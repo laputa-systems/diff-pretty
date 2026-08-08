@@ -1,12 +1,12 @@
 # Native Git Integration
 
-This document records the native Git integration contract. Stage 2 is now
-implemented for the local Git 2.55 fork: `git diff` can opt into an in-process
-Rust renderer through `builtin:diff-pretty`, while non-interactive output and
-unsupported commands retain Git's ordinary path.
+This document records the native Git integration contract. Stages 2 and 3 are
+implemented for the local Git 2.55 fork: `git diff`, `git show`, and `git log`
+can opt into an in-process Rust renderer through `builtin:diff-pretty`, while
+non-interactive output and unsupported commands retain Git's ordinary path.
 
-The remaining stages—commit/log events and retained-document optimization—are
-intentionally not part of this first usable milestone.
+Retained-document optimization and broader command coverage remain future
+work.
 
 ## Summary
 
@@ -15,9 +15,9 @@ The current process topology is:
 ```text
 git diff / git show / git log -p
             │
-            │ serialized diff bytes through a pipe
+            │ bounded C ABI stream
             ▼
-diff-pretty
+diff-pretty live renderer
             │
             │ native terminal drawing
             ▼
@@ -30,16 +30,16 @@ The native pager removed the second half of the old pipeline:
 diff-pretty → less → terminal
 ```
 
-There is still one process boundary and one pipe between Git and
-`diff-pretty`. `core.pager` cannot remove that boundary by configuration alone:
-Git treats the configured value as a shell command and starts it as a child
-process.
+The native path has no Git-to-child process boundary. Metadata written by
+`git log` and `git show` is forwarded through a bounded adapter pipe so Git can
+keep producing while the Rust pager renders and applies backpressure.
 
 The native version is now available in the companion Git fork: Git emits its
-existing diff-symbol stream through an opaque C ABI, Rust builds a retained
-document, and `scrl` drives the terminal without a Git-to-child pipe. The
-external process topology remains the compatibility path for stock Git and
-unsupported commands.
+existing diff-symbol stream and log metadata through an opaque C ABI, Rust
+renders the first non-empty chunk immediately into the live `scrl` session,
+and the producer is backpressured while the rest of the initial viewport is
+loaded. The external process topology remains the compatibility path for
+stock Git and unsupported commands.
 
 ## Current Git Boundary
 
@@ -324,28 +324,19 @@ status.
 An in-process pager has no pipe to break. That creates an important design
 choice:
 
-### Eager generation, then interactive paging
-
-1. Git emits all events into `RenderedDocument`.
-2. Rust enters the native pager.
-3. `q` only exits the pager; Git's diff generation is already complete.
-
-This is the safest first implementation. It avoids making Git's diff loops
-cancellation-aware, at the cost of waiting for the entire document before the
-first screen.
-
 ### Interleaved generation and paging
 
-Git emits events while the native pager displays the document. This could
-improve first-paint latency and reduce peak buffering, but it requires:
+Git emits events while the native pager displays the document:
 
 - A producer/consumer design inside one process.
-- A thread or cooperative event loop around Git's non-thread-safe machinery.
 - Backpressure when the user stops scrolling.
 - A cancellation flag checked through Git's diff and log loops.
 - Defined behavior when `q` happens during object traversal or text conversion.
 
-This should not be the first native integration target.
+The FFI owns the Rust pager thread and uses a one-slot channel. Git's adapter
+uses a reader thread for log metadata and carries incomplete UTF-8 code points
+across read boundaries. `scrl` loads only enough source data for the initial
+viewport, then asks for more as navigation requires it.
 
 ### Error propagation
 
@@ -437,10 +428,11 @@ make a Git enum reorder fail at compile time. The Rust side buffers one file
 section before feeding the existing renderer, preserving its frozen output
 behavior without a Git-side textual capture buffer.
 
-### Stage 3: commit/log events
+### Stage 3: commit/log events (implemented)
 
-Add commit header, message, decoration, and separator events. Enable `git log -p`
-only after its output is covered by the existing golden corpus.
+`git show` and `git log -p` keep commit metadata in the same ordered stream as
+semantic diff events. Git's metadata stream is pipe-backed and incremental so
+large histories do not wait for full capture before first paint.
 
 ### Stage 4: retained-document optimization
 
@@ -479,9 +471,9 @@ quit, pager error, Git error, and signal paths.
 
 ### Early quit
 
-Without a broken pipe, an in-process pager cannot stop Git's work unless the
-event path is cancellation-aware. Eager generation avoids this problem and is
-the recommended first milestone.
+The live channel closes when the user quits. The C adapter maps that condition
+to the ABI's non-error quit status, drains any in-flight metadata pipe safely,
+and stops accepting further Git events.
 
 ### Build complexity
 
@@ -491,11 +483,8 @@ distribution story. This is likely the largest non-code cost of the project.
 ## Recommendation
 
 Native event integration is feasible as a private Git fork, but it is not a
-small extension to `core.pager`. The right first experiment is a narrow,
-opt-in `builtin:diff-pretty` mode for `git diff`, with eager event collection,
-an opaque C ABI, and the existing native pager on the Rust side.
-
-Do not start by trying to stream events concurrently with Git or by exposing
-Git's private structs directly. First prove that an in-process diff-symbol
-adapter improves wall time, first paint, or memory enough to justify supporting
-a Git fork. Only then expand to commit/log events and a fully retained document.
+small extension to `core.pager`. The current opt-in `builtin:diff-pretty` mode
+keeps Git's private structs behind the C ABI and prioritizes first paint with a
+bounded live producer/consumer path. Future work should focus on reducing
+retained copies and extending command coverage without weakening cancellation
+or output-order guarantees.

@@ -14,7 +14,7 @@ version = "0.0.1"
 dependencies = [
  "regex-lite",
  "rustix",
- "rustybench 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustybench",
  "scrl",
 ]
 
@@ -122,28 +122,14 @@ dependencies = [
 [[package]]
 name = "rustybench"
 version = "0.1.0"
-dependencies = [
- "lexopt",
- "miniserde",
- "regex-lite",
- "rustybench-macros 0.1.0",
-]
-
-[[package]]
-name = "rustybench"
-version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b30d630ac8c78e1d96607fcbb39803f30c641602723f4fea9ee5e7fb99f000d"
 dependencies = [
  "lexopt",
  "miniserde",
  "regex-lite",
- "rustybench-macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustybench-macros",
 ]
-
-[[package]]
-name = "rustybench-macros"
-version = "0.1.0"
 
 [[package]]
 name = "rustybench-macros"
@@ -157,7 +143,7 @@ version = "0.0.1"
 dependencies = [
  "regex-lite",
  "rustix",
- "rustybench 0.1.0",
+ "rustybench",
  "unicode-width",
 ]
 

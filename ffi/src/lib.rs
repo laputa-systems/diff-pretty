@@ -6,9 +6,16 @@
 
 use diff_pretty::RenderSession;
 use diff_pretty::event::DiffEvent;
-use scrl::{ExitReason, PagingMode, RunOptions, SessionOptions};
+use scrl::{ChunkSource, ExitReason, PagingMode, RunOptions, SessionOptions};
 use std::ffi::{CString, c_char, c_uchar};
+use std::io;
 use std::ptr;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{
+    Arc, mpsc,
+    mpsc::{Receiver, SyncSender},
+};
+use std::thread::{self, JoinHandle};
 
 const ABI_VERSION: u32 = 1;
 const STATUS_OK: i32 = 0;
@@ -30,12 +37,14 @@ pub struct DiffPrettyConfig {
 
 struct NativeSession {
     renderer: Option<RenderSession>,
+    live: Option<LivePager>,
     document: Option<scrl::Document>,
     options: RunOptions,
     output_fd: i32,
     tty_fd: i32,
     error: Option<CString>,
     paged: bool,
+    live_finished: bool,
 }
 
 pub struct DiffPrettySession {
@@ -70,6 +79,113 @@ fn session_mut<'a>(session: *mut DiffPrettySession) -> Result<&'a mut NativeSess
     Ok(unsafe { &mut (*session).inner })
 }
 
+enum LiveInput {
+    Patch(Vec<u8>),
+    Event {
+        kind: u32,
+        flags: u32,
+        data: Vec<u8>,
+    },
+    Finish,
+}
+
+struct LiveSource {
+    receiver: Receiver<LiveInput>,
+}
+
+impl ChunkSource for LiveSource {
+    fn produce(self, emit: &mut dyn FnMut(&str) -> io::Result<()>) -> io::Result<()> {
+        let mut renderer = RenderSession::new();
+        let mut rendered = String::new();
+
+        loop {
+            match self.receiver.recv().map_err(|_| {
+                io::Error::new(io::ErrorKind::BrokenPipe, "Git stopped sending pager input")
+            })? {
+                LiveInput::Patch(data) => {
+                    let text = std::str::from_utf8(&data)
+                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                    renderer.push_patch_streaming(text, &mut rendered)?;
+                }
+                LiveInput::Event { kind, flags, data } => {
+                    renderer
+                        .push_event_streaming(DiffEvent::new(kind, flags, &data), &mut rendered)?;
+                }
+                LiveInput::Finish => {
+                    renderer.finish_streaming(&mut rendered);
+                    if !rendered.is_empty() {
+                        emit(&rendered)?;
+                    }
+                    return Ok(());
+                }
+            }
+
+            if !rendered.is_empty() {
+                emit(&rendered)?;
+                rendered.clear();
+            }
+        }
+    }
+}
+
+struct LivePager {
+    sender: SyncSender<LiveInput>,
+    result: Arc<AtomicI32>,
+    thread: Option<JoinHandle<io::Result<ExitReason>>>,
+}
+
+impl LivePager {
+    fn new(options: RunOptions) -> io::Result<Self> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let result = Arc::new(AtomicI32::new(STATUS_ERROR));
+        let thread_result = Arc::clone(&result);
+        let thread = thread::Builder::new()
+            .name("diff-pretty-pager".into())
+            .spawn(move || {
+                let result = scrl::run_source(LiveSource { receiver }, options);
+                let code = match &result {
+                    Ok(ExitReason::EndOfInput) => STATUS_OK,
+                    Ok(ExitReason::Quit) => STATUS_QUIT,
+                    Err(_) => STATUS_ERROR,
+                };
+                thread_result.store(code, Ordering::Release);
+                result
+            })?;
+        Ok(Self {
+            sender,
+            result,
+            thread: Some(thread),
+        })
+    }
+
+    fn send(&self, input: LiveInput) -> Result<(), i32> {
+        self.sender.send(input).map_err(|_| {
+            if self.result.load(Ordering::Acquire) == STATUS_QUIT {
+                STATUS_QUIT
+            } else {
+                STATUS_ERROR
+            }
+        })
+    }
+
+    fn finish(mut self) -> io::Result<ExitReason> {
+        let send_failed = self.sender.send(LiveInput::Finish).is_err();
+        let result = self
+            .thread
+            .take()
+            .expect("live pager thread already joined")
+            .join()
+            .map_err(|_| io::Error::other("diff-pretty pager thread panicked"))??;
+        if send_failed && self.result.load(Ordering::Acquire) != STATUS_QUIT {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "pager stopped before Git finished",
+            ));
+        }
+        Ok(result)
+    }
+}
+
 fn bytes<'a>(data: *const c_uchar, len: usize) -> Result<&'a [u8], i32> {
     if len == 0 {
         return Ok(&[]);
@@ -83,8 +199,17 @@ fn bytes<'a>(data: *const c_uchar, len: usize) -> Result<&'a [u8], i32> {
 }
 
 fn finish_session(session: &mut NativeSession) -> i32 {
-    if session.document.is_some() {
+    if session.document.is_some() || session.live_finished {
         return STATUS_OK;
+    }
+    if let Some(live) = session.live.take() {
+        match live.finish() {
+            Ok(ExitReason::EndOfInput | ExitReason::Quit) => {
+                session.live_finished = true;
+                return STATUS_OK;
+            }
+            Err(error) => return set_error(session, error),
+        }
     }
     let Some(renderer) = session.renderer.take() else {
         return set_error(session, "renderer is unavailable");
@@ -112,23 +237,38 @@ pub unsafe extern "C" fn diff_pretty_begin(
     if config.output_fd < 0 {
         return ptr::null_mut();
     }
-    let inner = NativeSession {
-        renderer: Some(RenderSession::new()),
-        document: None,
-        options: RunOptions {
-            paging,
-            session: SessionOptions {
-                title: "diff-pretty".into(),
-                search_history: Vec::new(),
-                wrap: false,
-                follow: false,
-                filter: None,
-            },
+    let options = RunOptions {
+        paging,
+        session: SessionOptions {
+            title: "diff-pretty".into(),
+            search_history: Vec::new(),
+            wrap: false,
+            follow: false,
+            filter: None,
         },
+    };
+    let live = if paging == PagingMode::Always && config.output_fd == 1 {
+        match LivePager::new(options.clone()) {
+            Ok(live) => Some(live),
+            Err(_) => return ptr::null_mut(),
+        }
+    } else {
+        None
+    };
+    let inner = NativeSession {
+        renderer: if live.is_none() {
+            Some(RenderSession::new())
+        } else {
+            None
+        },
+        live,
+        document: None,
+        options,
         output_fd: config.output_fd,
         tty_fd: config.tty_fd,
         error: None,
         paged: false,
+        live_finished: false,
     };
     Box::into_raw(Box::new(DiffPrettySession { inner }))
 }
@@ -149,6 +289,13 @@ pub unsafe extern "C" fn diff_pretty_push_patch(
         Ok(text) => text,
         Err(error) => return set_error(session, error),
     };
+    if let Some(live) = session.live.as_ref() {
+        return match live.send(LiveInput::Patch(text.as_bytes().to_vec())) {
+            Ok(()) => STATUS_OK,
+            Err(STATUS_QUIT) => STATUS_QUIT,
+            Err(_) => set_error(session, "live pager stopped accepting Git metadata"),
+        };
+    }
     let Some(renderer) = session.renderer.as_mut() else {
         return set_error(session, "patch submitted after diff_pretty_finish");
     };
@@ -172,6 +319,17 @@ pub unsafe extern "C" fn diff_pretty_push_event(
     let Ok(data) = bytes(data, len) else {
         return set_error(session, "invalid event buffer");
     };
+    if let Some(live) = session.live.as_ref() {
+        return match live.send(LiveInput::Event {
+            kind,
+            flags,
+            data: data.to_vec(),
+        }) {
+            Ok(()) => STATUS_OK,
+            Err(STATUS_QUIT) => STATUS_QUIT,
+            Err(_) => set_error(session, "live pager stopped accepting Git diff events"),
+        };
+    }
     let Some(renderer) = session.renderer.as_mut() else {
         return set_error(session, "event submitted after diff_pretty_finish");
     };
@@ -195,6 +353,10 @@ pub unsafe extern "C" fn diff_pretty_page(session: *mut DiffPrettySession) -> i3
         return STATUS_INVALID;
     };
     if session.paged {
+        return STATUS_OK;
+    }
+    if session.live_finished {
+        session.paged = true;
         return STATUS_OK;
     }
     if session.document.is_none() && finish_session(session) < STATUS_OK {
@@ -244,7 +406,10 @@ pub unsafe extern "C" fn diff_pretty_last_error(
 pub unsafe extern "C" fn diff_pretty_abort(session: *mut DiffPrettySession) {
     if !session.is_null() {
         // SAFETY: ownership is transferred back exactly once by the C caller.
-        drop(unsafe { Box::from_raw(session) });
+        let mut session = unsafe { Box::from_raw(session) };
+        if let Some(live) = session.inner.live.take() {
+            let _ = live.finish();
+        }
     }
 }
 

@@ -97,6 +97,9 @@ pub struct RenderSession {
     document: scrl::DocumentBuilder,
     state: RenderState,
     event_buffer: String,
+    patch_buffer: String,
+    patch_section: String,
+    patch_in_file: bool,
     complete: bool,
 }
 
@@ -106,6 +109,9 @@ impl RenderSession {
             document: scrl::DocumentBuilder::new(),
             state: RenderState::new(),
             event_buffer: String::new(),
+            patch_buffer: String::new(),
+            patch_section: String::new(),
+            patch_in_file: false,
             complete: false,
         }
     }
@@ -119,6 +125,26 @@ impl RenderSession {
         }
         self.flush_event_buffer();
         render_chunk(input, &mut self.document, &mut self.state, false);
+        Ok(())
+    }
+
+    /// Render a parser-safe chunk while also exposing the newly rendered bytes
+    /// to a live pager. The retained document remains the source of truth for
+    /// the existing finished-document path.
+    pub fn push_patch_streaming(&mut self, input: &str, output: &mut String) -> io::Result<()> {
+        if self.complete {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot push input after RenderSession::finish",
+            ));
+        }
+        self.flush_event_buffer_streaming(output);
+        self.patch_buffer.push_str(input);
+        while let Some(newline) = self.patch_buffer.find('\n') {
+            let line = self.patch_buffer[..=newline].to_owned();
+            self.patch_buffer.drain(..=newline);
+            self.push_patch_line_streaming(&line, output);
+        }
         Ok(())
     }
 
@@ -141,6 +167,29 @@ impl RenderSession {
         Ok(())
     }
 
+    /// Accept one semantic event and expose any completed file render to a
+    /// live pager. File boundaries remain the streaming boundary because word
+    /// pairing needs the complete hunk context.
+    pub fn push_event_streaming(
+        &mut self,
+        event: crate::event::DiffEvent<'_>,
+        output: &mut String,
+    ) -> io::Result<()> {
+        if self.complete {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot push event after RenderSession::finish",
+            ));
+        }
+        if event.kind == crate::event::HEADER && !self.event_buffer.is_empty() {
+            self.flush_event_buffer_streaming(output);
+        }
+        let mut fragment = String::with_capacity(event.data.len() + 8);
+        crate::event::append_patch_fragment(event, &mut fragment)?;
+        self.event_buffer.push_str(&fragment);
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn document(&self) -> scrl::Document {
         self.document.clone().finish()
@@ -152,11 +201,64 @@ impl RenderSession {
         self.document.finish()
     }
 
+    /// Finish the renderer while exposing the final rendered bytes to a live
+    /// pager. This is intentionally separate from `finish`, which consumes the
+    /// session for the retained-document ABI path.
+    pub fn finish_streaming(&mut self, output: &mut String) {
+        self.flush_event_buffer_streaming(output);
+        if !self.patch_buffer.is_empty() {
+            let line = std::mem::take(&mut self.patch_buffer);
+            self.push_patch_line_streaming(&line, output);
+        }
+        if !self.patch_section.is_empty() {
+            let section = std::mem::take(&mut self.patch_section);
+            self.render_streaming_chunk(&section, output, false);
+        }
+        if !self.complete {
+            self.render_streaming_chunk("", output, true);
+            self.complete = true;
+        }
+    }
+
     fn flush_event_buffer(&mut self) {
         if !self.event_buffer.is_empty() {
             let input = std::mem::take(&mut self.event_buffer);
             render_chunk(&input, &mut self.document, &mut self.state, false);
         }
+    }
+
+    fn flush_event_buffer_streaming(&mut self, output: &mut String) {
+        if !self.event_buffer.is_empty() {
+            let input = std::mem::take(&mut self.event_buffer);
+            self.render_streaming_chunk(&input, output, false);
+        }
+    }
+
+    fn push_patch_line_streaming(&mut self, line: &str, output: &mut String) {
+        let mut stripped = String::new();
+        strip_sgr_append(line.trim_end_matches(['\r', '\n']), &mut stripped);
+        let starts_file = stripped.starts_with("diff --git");
+        let starts_commit = is_commit_header(&stripped);
+
+        if starts_file || starts_commit {
+            if !self.patch_section.is_empty() {
+                let section = std::mem::take(&mut self.patch_section);
+                self.render_streaming_chunk(&section, output, false);
+            }
+            self.patch_in_file = starts_file;
+        }
+
+        self.patch_section.push_str(line);
+        if !self.patch_in_file {
+            let section = std::mem::take(&mut self.patch_section);
+            self.render_streaming_chunk(&section, output, false);
+        }
+    }
+
+    fn render_streaming_chunk(&mut self, input: &str, output: &mut String, final_chunk: bool) {
+        let output_start = output.len();
+        render_chunk(input, output, &mut self.state, final_chunk);
+        self.document.push_str(&output[output_start..]);
     }
 
     fn complete(&mut self) {
@@ -1213,6 +1315,37 @@ mod tests {
         assert!(chunks.len() > 1);
         assert!(chunks[0] > 0);
         assert_eq!(output, render(input).as_bytes());
+    }
+
+    #[test]
+    fn streaming_session_matches_finished_rendering() {
+        let input = concat!(
+            "commit 0123456789abcdef\nmessage\n",
+            "diff --git a/a b/a\n--- a/a\n+++ b/a\n",
+            "@@ -1 +1 @@\n-old\n+new\n",
+        );
+        let mut renderer = RenderSession::new();
+        let mut streamed = String::new();
+        for chunk in input.as_bytes().chunks(7) {
+            renderer
+                .push_patch_streaming(std::str::from_utf8(chunk).unwrap(), &mut streamed)
+                .unwrap();
+        }
+        renderer.finish_streaming(&mut streamed);
+
+        assert_eq!(streamed, render(input));
+    }
+
+    #[test]
+    fn streaming_session_emits_commit_metadata_before_end_of_input() {
+        let mut renderer = RenderSession::new();
+        let mut streamed = String::new();
+
+        renderer
+            .push_patch_streaming("commit 0123456789abcdef\n", &mut streamed)
+            .unwrap();
+
+        assert!(streamed.contains("commit 0123456789abcdef"));
     }
 
     #[test]

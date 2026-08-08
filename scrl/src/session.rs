@@ -718,6 +718,7 @@ fn run_terminal_live<S: ChunkSource>(
     };
     let mut finished = false;
     let mut quit = false;
+    let mut content_drawn = false;
     let receive = |session: &mut Session| -> io::Result<bool> {
         match receiver.recv() {
             Ok(LoadEvent::Chunk(chunk)) => {
@@ -749,6 +750,12 @@ fn run_terminal_live<S: ChunkSource>(
                 result = Err(error);
                 break;
             }
+        }
+        if result.is_ok() && pager_started && !content_drawn && session.document().line_count() > 0
+        {
+            result = session.draw(output);
+            content_drawn = result.is_ok();
+            last_draw = Some(Instant::now());
         }
         if !pager_started && session.document().line_count() > size.rows {
             pager_started = true;
