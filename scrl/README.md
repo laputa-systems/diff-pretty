@@ -120,10 +120,12 @@ alternate-screen controls.
 
 The producer-to-session path uses a one-chunk channel and cancellation flag.
 The runner initially pulls only enough chunks to fill the first viewport, then
-stops requesting source data while the user is idle. Forward navigation pulls
-one more chunk; `End` and a submitted search pull through EOF. Already loaded
-content is retained, so scrolling backward never requires replaying the pipe,
-but an untouched large input does not become a resident in-memory document.
+stops requesting source data while the user is idle. Forward navigation and
+search-match navigation pull one more chunk; `End` pulls through EOF. Search
+submission scans only the already-rendered prefix and does not force a large
+input through EOF. Already loaded content is retained, so scrolling backward
+never requires replaying the pipe, but an untouched large input does not become
+a resident in-memory document.
 
 ## Command line
 

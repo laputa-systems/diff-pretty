@@ -883,15 +883,15 @@ fn source_pull_request(session: &Session, finished: bool, event: Event) -> Sourc
         return SourcePull::None;
     }
     if session.search.input.is_some() {
-        return if event == Event::Enter {
-            SourcePull::All
-        } else {
-            SourcePull::None
-        };
+        // Search the rendered prefix on submission. A later `n`/`N` can
+        // extend that prefix one chunk at a time if the current matches are
+        // exhausted.
+        return SourcePull::None;
     }
-    if (session.search.session.is_some() && matches!(event, Event::Text('n' | 'N')))
-        || matches!(event, Event::Text('G') | Event::End)
-    {
+    if session.search.session.is_some() && matches!(event, Event::Text('n' | 'N')) {
+        return SourcePull::One;
+    }
+    if matches!(event, Event::Text('G') | Event::End) {
         return SourcePull::All;
     }
     if matches!(
@@ -964,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn source_pull_waits_at_loaded_viewport_until_navigation_needs_more() {
+    fn source_pull_keeps_search_lazy_until_navigation_needs_more() {
         let mut pager = session();
         pager.push_chunk("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n");
 
@@ -984,9 +984,15 @@ mod tests {
         );
 
         pager.handle(Event::Text('/'));
+        pager.handle(Event::Text('o'));
         assert_eq!(
             source_pull_request(&pager, false, Event::Enter),
-            SourcePull::All
+            SourcePull::None
+        );
+        pager.handle(Event::Enter);
+        assert_eq!(
+            source_pull_request(&pager, false, Event::Text('n')),
+            SourcePull::One
         );
     }
 
