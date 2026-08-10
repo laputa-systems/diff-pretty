@@ -65,6 +65,7 @@ pub enum Action {
 enum SourcePull {
     None,
     One,
+    UntilMatch,
     All,
 }
 
@@ -146,6 +147,7 @@ impl Session {
 
     pub fn push_chunk(&mut self, chunk: &str) {
         if !self.finished {
+            let last_line = self.document.line_count().checked_sub(1);
             if let Some(source_document) = &mut self.source_document {
                 source_document.append_for_session(chunk);
                 if let Some(pattern) = &self.filter {
@@ -154,6 +156,9 @@ impl Session {
                 }
             } else {
                 self.document.append_for_session(chunk);
+            }
+            if let Some(search) = self.search.session.as_mut() {
+                search.invalidate_append(last_line);
             }
             if self.follow {
                 self.top = self.max_top();
@@ -203,7 +208,7 @@ impl Session {
             }
             return Action::Continue { changed: true };
         }
-        match event {
+        let changed = match event {
             Event::Interrupt | Event::Text('q' | 'Q') => return Action::Quit,
             Event::Text('/') => {
                 self.search.begin(true);
@@ -217,46 +222,60 @@ impl Session {
                 self.help = true;
                 return Action::Continue { changed: true };
             }
-            Event::Text('n') => {
-                self.move_match(self.search.forward);
-            }
-            Event::Text('N') => {
-                self.move_match(!self.search.forward);
-            }
+            Event::Text('n') => self.move_match(self.search.forward),
+            Event::Text('N') => self.move_match(!self.search.forward),
             Event::Up => {
                 if !self.move_match(false) {
                     self.top = self.top.saturating_sub(1);
                 }
+                true
             }
             Event::Down => {
                 if !self.move_match(true) {
                     self.top = self.top.saturating_add(1);
                 }
+                true
             }
-            Event::Text('k') => self.top = self.top.saturating_sub(1),
-            Event::Text('j') => self.top = self.top.saturating_add(1),
+            Event::Text('k') => {
+                self.top = self.top.saturating_sub(1);
+                true
+            }
+            Event::Text('j') => {
+                self.top = self.top.saturating_add(1);
+                true
+            }
             Event::Text('b') | Event::PageUp => {
-                self.top = self.top.saturating_sub(self.content_rows())
+                self.top = self.top.saturating_sub(self.content_rows());
+                true
             }
             Event::Text(' ') | Event::PageDown => {
-                self.top = self.top.saturating_add(self.content_rows())
+                self.top = self.top.saturating_add(self.content_rows());
+                true
             }
-            Event::Text('g') | Event::Home => self.top = 0,
-            Event::Text('G') | Event::End => self.top = self.max_top(),
+            Event::Text('g') | Event::Home => {
+                self.top = 0;
+                true
+            }
+            Event::Text('G') | Event::End => {
+                self.top = self.max_top();
+                true
+            }
             Event::Left => {
                 self.horizontal_offset = self
                     .horizontal_offset
-                    .saturating_sub(self.horizontal_shift())
+                    .saturating_sub(self.horizontal_shift());
+                true
             }
             Event::Right => {
                 self.horizontal_offset = self
                     .horizontal_offset
-                    .saturating_add(self.horizontal_shift())
+                    .saturating_add(self.horizontal_shift());
+                true
             }
             _ => return Action::Continue { changed: false },
-        }
+        };
         self.clamp_top();
-        Action::Continue { changed: true }
+        Action::Continue { changed }
     }
 
     pub fn advance(&mut self) -> bool {
@@ -365,10 +384,11 @@ impl Session {
     }
 
     fn move_match(&mut self, forward: bool) -> bool {
+        let finished = self.finished;
         let Some(session) = self.search.session.as_mut() else {
             return false;
         };
-        let changed = session.next(&self.document, forward);
+        let changed = session.next(&self.document, forward, finished);
         self.ensure_search();
         changed
     }
@@ -823,7 +843,38 @@ fn run_terminal_live<S: ChunkSource>(
             Ok(event) => {
                 let pull = source_pull_request(&session, finished, event);
                 let mut loaded = false;
-                if !matches!(pull, SourcePull::None) {
+                let mut changed = false;
+                if matches!(pull, SourcePull::UntilMatch) {
+                    loop {
+                        if result.is_err() || quit {
+                            break;
+                        }
+                        match session.handle(event) {
+                            Action::Quit => {
+                                quit = true;
+                                break;
+                            }
+                            Action::Continue {
+                                changed: event_changed,
+                            } => {
+                                changed = event_changed;
+                                if event_changed || finished {
+                                    break;
+                                }
+                            }
+                        }
+                        match receive(&mut session) {
+                            Ok(done) => {
+                                loaded = true;
+                                finished = done;
+                            }
+                            Err(error) => {
+                                result = Err(error);
+                                break;
+                            }
+                        }
+                    }
+                } else if !matches!(pull, SourcePull::None) {
                     loop {
                         match receive(&mut session) {
                             Ok(done) => {
@@ -841,13 +892,16 @@ fn run_terminal_live<S: ChunkSource>(
                     }
                 }
                 if result.is_ok() {
-                    match session.handle(event) {
-                        Action::Quit => quit = true,
-                        Action::Continue { changed } => {
-                            if changed || loaded {
-                                result = session.draw(output);
-                            }
+                    if !matches!(pull, SourcePull::UntilMatch) {
+                        match session.handle(event) {
+                            Action::Quit => quit = true,
+                            Action::Continue {
+                                changed: event_changed,
+                            } => changed = event_changed,
                         }
+                    }
+                    if !quit && (changed || loaded) {
+                        result = session.draw(output);
                     }
                 }
             }
@@ -889,7 +943,7 @@ fn source_pull_request(session: &Session, finished: bool, event: Event) -> Sourc
         return SourcePull::None;
     }
     if session.search.session.is_some() && matches!(event, Event::Text('n' | 'N')) {
-        return SourcePull::One;
+        return SourcePull::UntilMatch;
     }
     if matches!(event, Event::Text('G') | Event::End) {
         return SourcePull::All;
@@ -992,7 +1046,7 @@ mod tests {
         pager.handle(Event::Enter);
         assert_eq!(
             source_pull_request(&pager, false, Event::Text('n')),
-            SourcePull::One
+            SourcePull::UntilMatch
         );
     }
 
@@ -1109,6 +1163,79 @@ mod tests {
         assert_eq!(
             pager.search.session.as_ref().unwrap().selected_line(),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn next_search_match_scrolls_the_viewport_to_the_selected_line() {
+        let mut pager = session();
+        pager.push_chunk("alpha\none\ntwo\nthree\nalpha\nfive\n");
+        pager.finish();
+        pager.handle(Event::Text('/'));
+        for character in "alpha".chars() {
+            pager.handle(Event::Text(character));
+        }
+        pager.handle(Event::Enter);
+
+        assert_eq!(pager.top, 0);
+        pager.handle(Event::Text('n'));
+
+        assert_eq!(
+            pager.search.session.as_ref().unwrap().selected_line(),
+            Some(4)
+        );
+        assert_eq!(pager.top, 3);
+    }
+
+    #[test]
+    fn unfinished_search_does_not_wrap_before_loading_the_next_chunk() {
+        let mut pager = session();
+        pager.push_chunk("alpha\none\ntwo\nthree\n");
+        pager.handle(Event::Text('/'));
+        for character in "alpha".chars() {
+            pager.handle(Event::Text(character));
+        }
+        pager.handle(Event::Enter);
+
+        assert!(matches!(
+            pager.handle(Event::Text('n')),
+            Action::Continue { changed: false }
+        ));
+        assert_eq!(
+            pager.search.session.as_ref().unwrap().selected_line(),
+            Some(0)
+        );
+
+        pager.push_chunk("four\nalpha\nfive\n");
+        pager.handle(Event::Text('n'));
+        assert_eq!(
+            pager.search.session.as_ref().unwrap().selected_line(),
+            Some(5)
+        );
+        assert_eq!(pager.top, 4);
+    }
+
+    #[test]
+    fn unfinished_search_rechecks_a_partial_line_after_append() {
+        let mut pager = session();
+        pager.push_chunk("alpha\none\nnee");
+        pager.handle(Event::Text('/'));
+        for character in "needle".chars() {
+            pager.handle(Event::Text(character));
+        }
+        pager.handle(Event::Enter);
+        assert_eq!(pager.search.session.as_ref().unwrap().selected_line(), None);
+
+        assert!(matches!(
+            pager.handle(Event::Text('n')),
+            Action::Continue { changed: false }
+        ));
+        pager.push_chunk("dle\nalpha\n");
+        pager.handle(Event::Text('n'));
+
+        assert_eq!(
+            pager.search.session.as_ref().unwrap().selected_line(),
+            Some(2)
         );
     }
 

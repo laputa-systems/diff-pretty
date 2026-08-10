@@ -20,10 +20,10 @@ boundary from the renderer's point of view.
 `scrl` owns the generic document, viewport, search, input decoding, source
 backpressure, and terminal lifecycle. The live runner pulls only the initial
 viewport and requests more rendered chunks for forward navigation, match
-navigation, or `End`; it retains the loaded prefix rather than evicting it.
-Search submission scans the loaded prefix without forcing the source to EOF. It
-does not know about Git, hunks, files, line-number styles, or the fixed width
-of the renderer.
+navigation up to the next match, or `End`; it retains the loaded prefix rather
+than evicting it. Search submission scans the loaded prefix without forcing the
+source to EOF. It does not know about Git, hunks, files, line-number styles, or
+the fixed width of the renderer.
 
 The dependency direction is one-way:
 

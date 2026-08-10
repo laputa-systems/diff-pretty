@@ -280,7 +280,17 @@ impl SearchState {
 }
 
 impl SearchSession {
+    pub(crate) fn invalidate_append(&mut self, last_line: Option<usize>) {
+        if let Some(line) = last_line.and_then(|line| self.cache.get_mut(line)) {
+            *line = None;
+        }
+        self.final_no_match = false;
+    }
+
     fn scan_line(&mut self, document: &Document, line: usize) -> &[Range] {
+        if line >= document.line_count() {
+            return &[];
+        }
         if line >= self.cache.len() {
             self.cache.resize(line + 1, None);
         }
@@ -332,7 +342,7 @@ impl SearchSession {
         }
     }
 
-    pub(crate) fn next(&mut self, document: &Document, forward: bool) -> bool {
+    pub(crate) fn next(&mut self, document: &Document, forward: bool, wrap: bool) -> bool {
         let Some((selected_line, selected_index)) = self.selected else {
             self.scan_until_match(document, 0);
             return self.selected.is_some();
@@ -341,11 +351,24 @@ impl SearchSession {
         if count == 0 {
             return false;
         }
-        for distance in 0..=count {
-            let line = if forward {
-                (selected_line + distance) % count
+        let end = if wrap {
+            count
+        } else if forward {
+            count.saturating_sub(selected_line)
+        } else {
+            selected_line
+        };
+        for distance in 0..=end {
+            let line = if wrap {
+                if forward {
+                    (selected_line + distance) % count
+                } else {
+                    (selected_line + count - (distance % count)) % count
+                }
+            } else if forward {
+                selected_line + distance
             } else {
-                (selected_line + count - (distance % count)) % count
+                selected_line - distance
             };
             let ranges = self.scan_line(document, line);
             if forward {
