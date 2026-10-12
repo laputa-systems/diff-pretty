@@ -1,14 +1,10 @@
-//! Configuration hardcoded from the target `[delta]` contract.
-//!
-//! All values are literal translations of the delta config that the test
-//! harness pins on the oracle. See the crate docs for the full config.
+//! Fixed colors, ANSI sequences, and layout primitives for rendered patches.
 
 use std::fmt::Write as _;
 
-/// ANSI SGR sequences used by the renderer. These mirror the exact bytes delta
-/// emits for each style; an `ansi_term`-style writer coalesces adjacent
-/// segments (emit prefix only on style change, reset on transition to plain,
-/// one reset at line end when the last style is non-plain).
+/// ANSI SGR sequences used by the renderer. Adjacent segments share style
+/// prefixes; transitions to plain reset the style, and styled lines end with
+/// one reset.
 pub mod sgr {
     pub const RESET: &str = "\x1b[0m";
     /// Blue: file decoration, hunk box, line-number cell borders.
@@ -51,7 +47,8 @@ pub fn push_pad_number(out: &mut String, line_number: Option<usize>, width: usiz
     let left = pad / 2;
     let right = pad - left;
     if pad > 0 && width % 2 != n_width % 2 {
-        // " " + centered-with-last-char-dropped (delta's center-right shift).
+        // Preserve the centered field when the width and digit count differ in
+        // parity by shifting the value one column to the right.
         out.push(' ');
         push_spaces(out, left);
         let _ = write!(out, "{n}");
@@ -68,8 +65,8 @@ fn push_spaces(out: &mut String, count: usize) {
 }
 
 /// The line-numbers format `{nm:^4}` / `{np:^4}`: a centered field of width 4,
-/// with delta's special "center-right" shift for single-digit numbers. A
-/// missing number produces `width` spaces.
+/// with a one-column right shift when the width and digit count differ in
+/// parity. A missing number produces `width` spaces.
 pub fn pad_number(line_number: Option<usize>, width: usize) -> String {
     let mut out = String::with_capacity(width);
     push_pad_number(&mut out, line_number, width);

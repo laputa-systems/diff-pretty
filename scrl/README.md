@@ -206,6 +206,3 @@ The suite covers plain, styled, horizontally clipped, cached-search, initial
 search, regex fallback, and live-chunk redraw paths. Unit tests cover document
 serialization, ANSI safety, search behavior, sources, session transitions,
 key decoding, frame writes/flushes, and terminal-independent help behavior.
-The controlling-PTY regressions can be run with `cargo build -p scrl &&
-python3 scripts/pty-test.py`; they cover initial status painting, visible search
-commands, and advancing across a non-matching line.

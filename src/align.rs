@@ -1,6 +1,5 @@
-//! Needleman-Wunsch / Wagner-Fischer alignment, replicated exactly from delta's
-//! `src/align.rs` (costs, parent pointers, tie-breaking, and operation order all
-//! matter for byte-for-byte output).
+//! Needleman-Wunsch / Wagner-Fischer alignment with fixed edit costs and
+//! deterministic tie-breaking for word-diff inference.
 
 const DELETION_COST: usize = 2;
 const INSERTION_COST: usize = 2;

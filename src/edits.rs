@@ -1,10 +1,7 @@
-//! Word-diff edit inference, replicated from delta's `src/edits.rs` and the
-//! `align` module. Given ordered minus and plus lines it produces, for each
-//! line, a sequence of (is_emph, text) sections; emph sections are the changed
-//! tokens highlighted per `minus/plus-emph-style`.
+//! Word-diff edit inference. Given ordered minus and plus lines it produces,
+//! for each line, sections marking the changed tokens for emphasis.
 //!
-//! The tokenization regex (hardcoded `\w+`) and all costs/thresholds mirror the
-//! oracle config.
+//! Word runs use the fixed `\w+`-style tokenization rule.
 
 use crate::align::{Alignment, Cell, Operation};
 
@@ -13,10 +10,9 @@ fn is_word_char(c: char) -> bool {
     c == '_' || c.is_alphanumeric()
 }
 
-/// Split `line` into tokens for alignment, replicating delta's `tokenize`, but
-/// writing into the caller-owned `tokens` buffer (cleared first). Word runs are
-/// found in a single pass and gap characters are pushed directly, so nothing is
-/// allocated. Token layout, matching delta exactly:
+/// Split `line` into tokens for alignment, writing into the caller-owned
+/// `tokens` buffer (cleared first). Word runs are found in a single pass and
+/// gap characters are pushed directly, so nothing is allocated. Token layout:
 ///
 /// `tokens` starts as `[""]`; before the first word run an extra `""` is pushed
 /// when the run doesn't start at byte 0, each gap is pushed as one token per

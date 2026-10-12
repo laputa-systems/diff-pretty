@@ -1,5 +1,4 @@
-//! The delta-subset renderer: parse `git show` output and emit bytes matching
-//! the oracle byte-for-byte under the hardcoded config.
+//! Parse Git-style patches and render them with the fixed presentation config.
 
 use std::borrow::Cow;
 use std::io::{self, BufRead, Write};
@@ -91,12 +90,10 @@ impl<W: Write> RenderSink for IoSink<'_, W> {
     }
 }
 
-/// Incrementally renders parser-safe diff chunks or Git semantic events into
-/// scrl's generic retained document.
+/// Incrementally renders parser-safe diff chunks into scrl's generic document.
 pub struct RenderSession {
     document: scrl::DocumentBuilder,
     state: RenderState,
-    event_buffer: String,
     patch_buffer: String,
     patch_section: String,
     patch_in_file: bool,
@@ -108,7 +105,6 @@ impl RenderSession {
         Self {
             document: scrl::DocumentBuilder::new(),
             state: RenderState::new(),
-            event_buffer: String::new(),
             patch_buffer: String::new(),
             patch_section: String::new(),
             patch_in_file: false,
@@ -123,7 +119,6 @@ impl RenderSession {
                 "cannot push input after RenderSession::finish",
             ));
         }
-        self.flush_event_buffer();
         render_chunk(input, &mut self.document, &mut self.state, false);
         Ok(())
     }
@@ -138,7 +133,6 @@ impl RenderSession {
                 "cannot push input after RenderSession::finish",
             ));
         }
-        self.flush_event_buffer_streaming(output);
         self.patch_buffer.push_str(input);
         while let Some(newline) = self.patch_buffer.find('\n') {
             let line = self.patch_buffer[..=newline].to_owned();
@@ -148,64 +142,20 @@ impl RenderSession {
         Ok(())
     }
 
-    /// Accept one Git semantic event. Git's callbacks are line-granular, while
-    /// the frozen renderer needs the enclosing file header and hunk together;
-    /// buffer only until the next file header, then reuse the same parser.
-    pub fn push_event(&mut self, event: crate::event::DiffEvent<'_>) -> io::Result<()> {
-        if self.complete {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot push event after RenderSession::finish",
-            ));
-        }
-        if event.kind == crate::event::HEADER && !self.event_buffer.is_empty() {
-            self.flush_event_buffer();
-        }
-        let mut fragment = String::with_capacity(event.data.len() + 8);
-        crate::event::append_patch_fragment(event, &mut fragment)?;
-        self.event_buffer.push_str(&fragment);
-        Ok(())
-    }
-
-    /// Accept one semantic event and expose any completed file render to a
-    /// live pager. File boundaries remain the streaming boundary because word
-    /// pairing needs the complete hunk context.
-    pub fn push_event_streaming(
-        &mut self,
-        event: crate::event::DiffEvent<'_>,
-        output: &mut String,
-    ) -> io::Result<()> {
-        if self.complete {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "cannot push event after RenderSession::finish",
-            ));
-        }
-        if event.kind == crate::event::HEADER && !self.event_buffer.is_empty() {
-            self.flush_event_buffer_streaming(output);
-        }
-        let mut fragment = String::with_capacity(event.data.len() + 8);
-        crate::event::append_patch_fragment(event, &mut fragment)?;
-        self.event_buffer.push_str(&fragment);
-        Ok(())
-    }
-
     #[cfg(test)]
     pub(crate) fn document(&self) -> scrl::Document {
         self.document.clone().finish()
     }
 
     pub fn finish(mut self) -> scrl::Document {
-        self.flush_event_buffer();
         self.complete();
         self.document.finish()
     }
 
     /// Finish the renderer while exposing the final rendered bytes to a live
     /// pager. This is intentionally separate from `finish`, which consumes the
-    /// session for the retained-document ABI path.
+    /// session for the retained-document path.
     pub fn finish_streaming(&mut self, output: &mut String) {
-        self.flush_event_buffer_streaming(output);
         if !self.patch_buffer.is_empty() {
             let line = std::mem::take(&mut self.patch_buffer);
             self.push_patch_line_streaming(&line, output);
@@ -217,20 +167,6 @@ impl RenderSession {
         if !self.complete {
             self.render_streaming_chunk("", output, true);
             self.complete = true;
-        }
-    }
-
-    fn flush_event_buffer(&mut self) {
-        if !self.event_buffer.is_empty() {
-            let input = std::mem::take(&mut self.event_buffer);
-            render_chunk(&input, &mut self.document, &mut self.state, false);
-        }
-    }
-
-    fn flush_event_buffer_streaming(&mut self, output: &mut String) {
-        if !self.event_buffer.is_empty() {
-            let input = std::mem::take(&mut self.event_buffer);
-            self.render_streaming_chunk(&input, output, false);
         }
     }
 
@@ -317,8 +253,7 @@ impl Color {
     }
 }
 
-/// A delta style (subset of `nu_ansi_term::Style`). The SGR prefix orders
-/// attributes bold..strikethrough then background then foreground.
+/// ANSI style state used to generate minimal SGR prefixes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Style {
     pub fg: Option<Color>,
@@ -549,9 +484,8 @@ impl Default for Writer {
 ///
 /// `sections` are the word-diff `(is_emph, text)` runs; `base_emph` /
 /// `base_plain` pick the minus or plus palette. When `ws_error` is set, the
-/// trailing whitespace-only run of sections gets the whitespace-error style
-/// (delta does this for plus lines only). Empty sections are skipped, matching
-/// delta's `paint_line`.
+/// trailing whitespace-only run of sections gets the whitespace-error style.
+/// Empty sections are skipped.
 ///
 /// `w` is a single line buffer reused across all hunk lines; `flush` clears it
 /// while retaining capacity, so the per-line `String` is allocated once.
@@ -747,9 +681,9 @@ fn render_chunk(
     final_chunk: bool,
 ) {
     // git colorizes the diff it sends to its pager, so the input carries CSI
-    // SGR codes. We keep the raw (possibly colored) lines for passthrough
-    // regions that delta reproduces verbatim (commit meta), and a stripped copy
-    // for parsing; hunk lines are re-styled by us regardless of input color.
+    // SGR codes. Keep raw (possibly colored) lines for metadata passthrough and
+    // a stripped copy for parsing; hunk lines are restyled regardless of input
+    // color.
     let raw_lines: Vec<&str> = input.lines().collect();
     // The stripped copy is borrowed where possible. Plain inputs (no ESC) borrow
     // `raw_lines` directly and allocate nothing; colorized inputs are stripped
@@ -846,8 +780,8 @@ fn render_chunk(
         if is_commit_header(line) {
             // `git log -p` interleaves a commit header before each diff. A new
             // commit ends any in-progress file and resets to verbatim
-            // commit-meta mode (delta does the same; `commit-decoration-style
-            // = none` means the header is passed through undecorated).
+            // commit-meta mode. Metadata stays undecorated and is passed
+            // through as received.
             if let Some(fi) = pending_file.take() {
                 emit_file_decoration(out, &fi, None);
             }
@@ -868,10 +802,9 @@ fn render_chunk(
             if let Some(fi) = pending_file.take() {
                 emit_file_decoration(out, &fi, None);
             }
-            // `decorations` feature in the aligned live config sets
-            // `hunk-header-style = none`: delta writes a blank line and, when
-            // the `@@` line carries a code fragment, a box (bullet + fragment,
-            // no line number). No box otherwise.
+            // Separate the hunk from the file header. When the `@@` line has a
+            // code fragment, draw a box with the fragment and no line number.
+            // Hunk headers without a fragment have no box.
             out.push('\n');
             emit_hunk_box(out, line_writer, line);
             i += 1;
@@ -886,8 +819,8 @@ fn render_chunk(
             let mut minus_n = minus_start;
             let mut plus_n = plus_start;
 
-            // Flush a buffered run of minus/plus lines (delta paints all minus
-            // then all plus within a run) with word-diff inference. The buffers
+            // Flush a buffered run of minus/plus lines, removed lines first,
+            // with word-diff inference. The buffers
             // are passed straight in (no `&str` collection), and the flat
             // section runs are walked by per-line range.
             macro_rules! flush_run {
@@ -912,8 +845,7 @@ fn render_chunk(
                         }
                         for &(start, len) in res.plus_ranges {
                             // Trailing whitespace on added lines is a whitespace
-                            // error, styled with the ws-error style (delta does
-                            // this for plus lines only).
+                            // error, styled with the whitespace-error style.
                             write_hunk_line(
                                 out,
                                 line_writer,
@@ -1118,7 +1050,7 @@ const BORDER_80: &str =
     "────────────────────────────────────────────────────────────────────────────────";
 
 fn emit_file_decoration(out: &mut impl RenderSink, fi: &FileInfo, addendum: Option<&str>) {
-    out.push('\n'); // delta writes a blank line before every file decoration
+    out.push('\n'); // Separate each file decoration from preceding content.
     out.push_str(sgr::BLUE);
     emit_file_decor(out, fi);
     if let Some(a) = addendum {
@@ -1137,7 +1069,7 @@ fn emit_file_decoration(out: &mut impl RenderSink, fi: &FileInfo, addendum: Opti
 
 /// Write the decoration label+paths directly into `out` (no intermediate
 /// `String`). Paths are written verbatim; a leading non-empty label gets a
-/// trailing space, matching delta's `format!("{s} ")`.
+/// trailing space.
 fn emit_file_decor(out: &mut impl RenderSink, fi: &FileInfo) {
     // Plain unified diffs are shown in comparing form regardless of the paths.
     if fi.plain {
@@ -1184,9 +1116,8 @@ fn push_decor_label(out: &mut impl RenderSink, s: &str) {
 const TAB_STOP: &str = "        ";
 
 /// Replace each tab with a constant number of spaces (`--tabs` default 8),
-/// matching delta's `tabs::expand`: `line.split('\t').join("        ")`. It is
-/// not tab-stop alignment. Lines without a tab are returned borrowed, so the
-/// common case allocates nothing.
+/// replacing each tab with eight spaces. This is not tab-stop alignment. Lines
+/// without a tab are returned borrowed, so the common case allocates nothing.
 fn expand_tabs(s: &str) -> Cow<'_, str> {
     if !s.as_bytes().contains(&b'\t') {
         return Cow::Borrowed(s);
@@ -1219,8 +1150,8 @@ fn strip_sgr_append(s: &str, scratch: &mut String) {
 
 /// Emit the hunk-header box for `hunk-header-style = none` on a `@@` line that
 /// carries a code fragment: `┌─ ... ┐` / `• <fragment> │` / `└─ ... ┘`, with no
-/// line number. When the `@@` line has no fragment, delta draws no box (the
-/// caller has already emitted the blank line).
+/// line number. When the `@@` line has no fragment, no box is drawn (the caller
+/// has already emitted the blank line).
 ///
 /// `w` is the reused line Writer: the content line is pushed through it (no
 /// per-box Writer) and the borders are pushed from the `─` constant (no
@@ -1280,9 +1211,8 @@ fn hunk_fragment(hunk_line: &str) -> &str {
     rest.trim_end()
 }
 
-/// Whether a (SGR-stripped) line starts a git commit header, e.g.
-/// `commit 4a3ebfa4...` (possibly followed by ` (HEAD -> main)`). Mirrors
-/// delta's commit_regex `^commit [0-9a-f]{7,}`.
+/// Whether a (SGR-stripped) line starts a Git commit header: `commit ` followed
+/// by at least seven hexadecimal digits, optionally followed by a ref label.
 fn is_commit_header(s: &str) -> bool {
     let Some(rest) = s.strip_prefix("commit ") else {
         return false;
@@ -1385,37 +1315,6 @@ mod tests {
         let first_file = std::str::from_utf8(first_file.as_deref().unwrap()).unwrap();
         assert!(first_file.contains("\x1b[31mold"));
         assert!(!first_file.contains("@@ -1 +1 @@"));
-    }
-
-    #[test]
-    fn semantic_events_buffer_file_sections_for_the_existing_renderer() {
-        let mut renderer = RenderSession::new();
-        let events = [
-            crate::event::DiffEvent::new(crate::event::HEADER, 0, b"diff --git a/a b/a\n"),
-            crate::event::DiffEvent::new(crate::event::FILEPAIR_MINUS, 0, b"a/a"),
-            crate::event::DiffEvent::new(crate::event::FILEPAIR_PLUS, 0, b"b/a"),
-            crate::event::DiffEvent::new(crate::event::CONTEXT_FRAGINFO, 0, b"@@ -1 +1 @@\n"),
-            crate::event::DiffEvent::new(crate::event::MINUS, 0, b"old\n"),
-            crate::event::DiffEvent::new(crate::event::PLUS, 0, b"new\n"),
-            crate::event::DiffEvent::new(crate::event::HEADER, 0, b"diff --git a/b b/b\n"),
-            crate::event::DiffEvent::new(crate::event::FILEPAIR_MINUS, 0, b"a/b"),
-            crate::event::DiffEvent::new(crate::event::FILEPAIR_PLUS, 0, b"b/b"),
-            crate::event::DiffEvent::new(crate::event::CONTEXT_FRAGINFO, 0, b"@@ -1 +1 @@\n"),
-            crate::event::DiffEvent::new(crate::event::MINUS, 0, b"left\n"),
-            crate::event::DiffEvent::new(crate::event::PLUS, 0, b"right\n"),
-        ];
-        for event in events {
-            renderer.push_event(event).unwrap();
-        }
-        let document = renderer.finish();
-        let mut output = Vec::new();
-        document.write_to(&mut output).unwrap();
-
-        let patch = concat!(
-            "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n",
-            "diff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-left\n+right\n",
-        );
-        assert_eq!(output, render(patch).as_bytes());
     }
 
     #[test]

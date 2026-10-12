@@ -6,8 +6,8 @@ contract, and writes ANSI-styled output to stdout. The renderer is deliberately
 small: it does not read user configuration, invoke an external pager, or
 attempt to reproduce every Git diff mode.
 
-The output contract is defined by this document, the implementation, and the
-checked-in golden fixtures. Keep those sources aligned when changing behavior.
+The output contract is defined by this document and the implementation. Keep
+them aligned when changing behavior.
 
 ## Output contract
 
@@ -39,9 +39,8 @@ The default presentation is fixed and has no configuration-file layer:
   unchanged apart from the renderer's normal line ending handling. Diff
   content is parsed and restyled rather than preserving input color sequences.
 
-The output is intentionally deterministic. Any intentional output change must
-update the affected golden files under `fixtures/oracle/` and the explanation
-in the relevant documentation or test.
+The output is intentionally deterministic. Explain intentional output changes
+in the relevant documentation or tests.
 
 ## Repository layout
 
@@ -61,76 +60,29 @@ in the relevant documentation or test.
 - `src/main.rs` — command-line stdin/stdout plumbing and paging flags.
 - `benches/bench.rs` — curated throughput, allocation, alignment, rendering,
   and viewport benchmarks.
-- `fixtures/*.patch` — checked-in representative patch inputs: commit-based
-  Git patches, multi-commit patch streams, colorized input, and plain unified
-  diffs.
-- `fixtures/oracle/*.out` — checked-in expected output for each fixture. These
-  are the project's frozen presentation contract, not generated at test time.
-- `tests/golden.rs` — compares the string, streaming, and retained-document
-  render paths byte-for-byte against every golden.
-- `scripts/check.sh` — renders every fixture through the binary and compares it
-  with its golden output.
-- `scripts/diff.sh` — shows an ANSI-stripped diff for one fixture.
+- `fixtures/*.patch` — checked-in visual examples and representative patch
+  inputs: commit-based Git patches, multi-commit patch streams, colorized input,
+  and plain unified diffs.
 - `benches/baseline.json` — local host baseline written by the rustybench tooling;
   it is intentionally ignored because timing data is machine-specific.
-- `scripts/pgo-workload.py` — launch the explicit application binary for the
-  deterministic PGO scenario and optional repeated timing samples.
-- `PGO.md` — PGO contamination audit, workflow boundaries, POC assumptions,
-  provenance checks, and deferred workload design.
-- `GITOXIDE-INTEGRATION.md` and `NATIVE-INTEGRATION.md` — research notes for
-  possible structured integrations; they are not part of the current runtime
-  path.
 - `TODO.md` — known behavior gaps and explicitly deferred input modes.
 
 ## Commands
 
 ```sh
-make test                     # release-mode Rust tests and golden snapshots
+make test                     # release-mode Rust tests
 make scrl                     # release build of the standalone scrl command
-make ffi-release-package TARGET=... # target-specific static C FFI package
-make check                    # byte-for-byte binary check over every fixture
-make diff FIXTURE=show_003    # ANSI-stripped diff for one fixture
 make bench                    # run benchmarks and persist a host baseline
 make bench-diff AFTER=...     # compare a candidate baseline with the saved one
-make release                  # release build (no PGO): build-std + aggressive flags
-make pgo-instrument           # build the isolated instrumented application binary
-make pgo-instrument-linux     # instrument the dynamic musl application (Linux)
-make pgo-instrument-linux-static # instrument the static musl application (Linux)
-make pgo-profile              # run the application workload and merge its profiles
-make pgo-merge                # merge already-produced application .profraw files
-make release-pgo              # PGO-optimized release for the host target
-make release-pgo-linux        # PGO + dynamically linked musl (Linux only)
-make release-pgo-linux-static # PGO + statically linked musl (Linux only)
+make release                  # static release build
+make release-dynamic          # dynamic musl release build (Linux)
 make verify-release           # ELF checks for the static musl release
 make verify-release-dynamic   # ELF checks for the dynamic musl release
 ```
 
-PGO release targets:
-
-- `pgo-instrument` builds the actual `diff-pretty` release binary into an
-  isolated target directory with target-scoped `-Cprofile-generate` flags.
-  `pgo-profile` invokes that explicit binary through
-  `scripts/pgo-workload.py`; it does not invoke Cargo, rustybench, a benchmark
-  binary, or the benchmark allocator. The raw profiles and merged report live
-  under `target/pgo-profiles/`.
-- `pgo-profile-linux` and `pgo-profile-linux-static` keep dynamic and static
-  musl instrumentation separate. Run them inside the matching `Dockerfile`
-  image, as the release workflow does.
-- `release-pgo` (and the Linux variants) rebuild with `-Cprofile-use` plus
-  `-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort` and
-  `build-std`. Linux builds need the `diff-pretty-crt` stub objects and the
-  clang/musl toolchain provided by the `Dockerfile`; the dynamic variant links
-  against the musl loader, the static variant does not.
-- The audit, POC scenario, profile provenance checks, comparison procedure, and
-  deferred workload design are recorded in `PGO.md`.
-
 The release workflow (`.github/workflows/release.yml`, manual dispatch) builds
-macOS and Linux artifacts inside the `Dockerfile` image on each target, runs
-`make verify-release[-dynamic]` and `make test-ci`, then uploads the binaries,
-the target-specific `diff-pretty-ffi-<target>.tar.gz` static C packages, and
-creates a pre-release. The FFI package contains `include/diff_pretty.h`,
-`lib/libdiff_pretty_ffi.a`, and a small `manifest`; it is sufficient to link
-the native Git adapter without installing Rust on the Git build machine.
+macOS and Linux executables, verifies Linux static and dynamic variants, then
+uploads zipped executable artifacts and creates a pre-release.
 
 Both binaries read from stdin and write to stdout. The diff renderer reads:
 
@@ -207,14 +159,14 @@ pairing needs the complete hunk context.
   the implementation. Prefer observable output and invariants over tests of
   private helper details.
 - Keep the string, streaming, incremental, retained-document, and pager paths
-  behaviorally equivalent. The golden test exercises all render paths.
+  behaviorally equivalent.
 - Treat changes to ANSI bytes, line numbering, hunk pairing, separators,
   decorations, parser boundaries, or pager lifecycle as contract changes. Update
-  tests and goldens deliberately rather than accepting incidental churn.
+  tests deliberately rather than accepting incidental churn.
 - Keep the renderer independent of terminal state. Terminal detection, raw mode,
   alternate-screen handling, and key input belong in `scrl/src/terminal.rs`.
 - Avoid new dependencies unless they are necessary and explicitly justified.
-- Use the nearest hard judge first: `cargo test`, `make check`, a focused test,
-  or a benchmark. Broaden validation when the change affects shared behavior.
+- Use the nearest hard judge first: `cargo test`, a focused test, or a
+  benchmark. Broaden validation when the change affects shared behavior.
 - Do not silently broaden unsupported input modes. Record deliberate scope
   changes in `TODO.md` and add representative fixtures.

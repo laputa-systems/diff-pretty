@@ -56,8 +56,7 @@ infers or splits Git structures.
 
 When paging is disabled, stdout is not a terminal, or the terminal cannot be
 used, diff-pretty renders directly through `render_reader_to`. Direct output
-does not enter an alternate screen and remains byte-for-byte compatible with
-the checked-in golden fixtures.
+does not enter an alternate screen.
 
 ## Embedded options
 
@@ -88,11 +87,10 @@ because they would change the fixed presentation or input contract.
 - `--paging=never` and direct-output fallback preserve existing behavior.
 - Quitting or terminal failure restores raw mode and alternate-screen state.
 
-Run the integration judges with:
+Run the workspace tests with:
 
 ```sh
 cargo test --workspace --all-targets --release
-make check
 ```
 
 The standalone package's tests and focused redraw benchmarks live under
