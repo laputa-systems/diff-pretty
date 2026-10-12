@@ -6,3 +6,8 @@ linker = "rust-lld"
 
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
+
+# libc declares iconv on macOS even when no iconv symbols are used. Avoid
+# loading that unused image at startup; keep Cargo's normal release profile.
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-dead_strip_dylibs"]

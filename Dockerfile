@@ -14,6 +14,9 @@ RUN apk add --no-cache \
     git \
     tzdata
 
+# rustix requests libutil for Unix PTY support; musl provides those symbols in
+# libc, so an empty archive satisfies the legacy library name without adding a
+# glibc runtime dependency.
 RUN ar rcs /usr/lib/libutil.a
 
 # Use the same prebuilt LLVM family as the Linux CI image. The archive is
@@ -64,19 +67,28 @@ ENV PATH="/opt/llvm-musl/bin:/root/.cargo/bin:$PATH" \
 RUN rustup toolchain install nightly-2026-09-15 \
     --target x86_64-unknown-linux-musl \
     --target aarch64-unknown-linux-musl \
-    --component rust-src
+    --component rust-src \
+    --component llvm-tools-preview
 
-# Host proc-macro crates are dynamically linked while Cargo builds. Link the
-# target CRT objects and Alpine libc names from rustc's musl host target dir.
-RUN host_libdir="$(rustc --print target-libdir)" \
-    && host_target="$(rustc -vV | awk '/^host:/ {print $2}')" \
+# Host proc-macro links search rustc's target library directory for CRT
+# startup objects. Keep those objects available there without changing the
+# target's build-std Rust flags.
+RUN host_target="$(rustc -vV | awk '/^host:/ {print $2}')" \
+    && host_libdir="$(rustc --print target-libdir)" \
     && for obj in crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o; do \
         ln -sf "/usr/lib/diff-pretty-crt/$host_target/$obj" "$host_libdir/$obj"; \
-    done \
+    done
+
+# Host proc-macro crates are dynamically linked while Cargo builds. Make the
+# Alpine libc and libgcc_s names visible in rustc's musl host target directory.
+RUN host_libdir="$(rustc --print target-libdir)" \
     && ln -sf /usr/lib/libgcc_s.so.1 "$host_libdir/libgcc_s.so" \
     && ln -sf /usr/lib/libgcc_s.so.1 "$host_libdir/libgcc_s.so.1" \
     && ln -sf /usr/lib/libc.so "$host_libdir/libc.so"
 
+# Keep musl linker, CRT, and loader flags in the image. Makefiles select only
+# static, dynamic, or test mode through this wrapper, so the same release
+# commands work on both container architectures.
 RUN cat > /usr/local/bin/musl-cargo <<'EOF' \
     && chmod +x /usr/local/bin/musl-cargo
 #!/bin/sh
@@ -121,6 +133,9 @@ linker_var="CARGO_TARGET_${target_env}_LINKER"
 rustflags_var="CARGO_TARGET_${target_env}_RUSTFLAGS"
 export "$linker_var=clang"
 if [ "$mode" = test ]; then
+    # Cargo builds proc-macro and test-support crates for the container host,
+    # where target-scoped flags do not apply. Keep those links on the same
+    # musl CRT path as the binary.
     unset CARGO_ENCODED_RUSTFLAGS
     export RUSTFLAGS="$flags"
 else

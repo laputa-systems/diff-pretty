@@ -2,10 +2,11 @@
 name = "diff-pretty"
 version = "0.0.1"
 edition = "2024"
+license = "MIT"
+description = "A pager and renderer for Git-style unified diffs"
 
 [workspace]
 members = ["scrl"]
-resolver = "2"
 
 [dependencies]
 regex-lite = "0.1.9"

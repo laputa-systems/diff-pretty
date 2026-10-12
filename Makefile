@@ -1,41 +1,34 @@
 NAME       := diff-pretty
-RUSTYBENCH  ?= cargo run --quiet --manifest-path ../rustybench/Cargo.toml --
 HOST       := $(shell rustc -vV | awk '/^host:/ {print $$2}')
 TARGET     ?= $(subst -unknown-linux-gnu,-unknown-linux-musl,$(HOST))
 TARGET_ENV := $(shell printf '%s' "$(TARGET)" | tr '[:lower:]-' '[:upper:]_')
 CARGO_CMD  := $(if $(findstring -linux-musl,$(TARGET)),$(shell command -v musl-cargo 2>/dev/null || printf cargo),cargo)
+comma      := ,
+# Setting RUSTFLAGS replaces the target rustflags from .cargo/config.toml, so the
+# macOS unused-dylib link argument is repeated for release builds.
+RELEASE_RUSTFLAGS := -Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort $(if $(findstring apple-darwin,$(TARGET)),-Clink-arg=-Wl$(comma)-dead_strip_dylibs)
 # Docker's musl-cargo wrapper owns linker, CRT, and loader flags. The Makefile
-# selects only the build mode and keeps Cargo invocations readable on macOS
-# as well as in the Linux release image.
-cargo = $(if $(findstring -linux-musl,$(TARGET)),,$(if $(filter release-static release-dynamic test,$(1)),CARGO_TARGET_$(TARGET_ENV)_LINKER=clang ,)$(if $(filter release-static release-dynamic,$(1)),RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort")) MUSL_TARGET="$(TARGET)" MUSL_BUILD_MODE="$(1)" $(CARGO_CMD)
+# selects only the build mode and keeps Cargo invocations readable on macOS as
+# well as in the Linux release image.
+cargo = $(if $(findstring -linux-musl,$(TARGET)),,$(if $(filter release-static release-dynamic test,$(1)),CARGO_TARGET_$(TARGET_ENV)_LINKER=clang ,)$(if $(filter release-static release-dynamic,$(1)),RUSTFLAGS="$(RELEASE_RUSTFLAGS)")) MUSL_TARGET="$(TARGET)" MUSL_BUILD_MODE="$(1)" $(CARGO_CMD)
 
-.PHONY: test scrl lint bench bench-diff release release-dynamic verify-release verify-release-dynamic install
+RUSTYBENCH  ?= cargo run --quiet --manifest-path ../rustybench/Cargo.toml --
+
+.PHONY: build test test-ci lint release release-dynamic verify-release verify-release-dynamic install
+.PHONY: scrl bench bench-diff
+
+build:
+	$(call cargo,dev) build
 
 test:
 	cargo test --workspace --release
 
-scrl:
-	cargo build --release -p scrl
+test-ci:
+	$(call cargo,test) test --quiet --release
 
 lint:
 	cargo fmt --all
 	cargo clippy --fix --allow-dirty --all-targets --all-features -- --deny warnings
-
-# Run the curated rustybench suite and persist a host baseline (see benches/bench.rs
-# for what is measured and why).
-bench:
-	@$(RUSTYBENCH) baseline --root "$(CURDIR)" --baseline "$(CURDIR)/benches/baseline.json" -- cargo bench --bench bench
-
-# Compare a candidate baseline against the persisted host baseline.
-# Usage: make bench-diff AFTER=path/to/baseline.json
-bench-diff:
-	@BASELINE="$(CURDIR)/benches/baseline.json"; \
-	test -f "$$BASELINE" || { echo "no baseline yet; run 'make bench' first" >&2; exit 1; }; \
-	$(RUSTYBENCH) diff "$$BASELINE" "$(AFTER)"
-
-test-ci:
-	@test -x "target/$(TARGET)/release/$(NAME)"
-	$(call cargo,test) test --quiet --release
 
 release:
 	$(call cargo,release-static) clean -p $(NAME) --release --target $(TARGET)
@@ -75,8 +68,23 @@ release-dynamic:
 	  -Z build-std-features= \
 	  --target $(TARGET)
 
-install: release verify-release
-	cp "target/$(TARGET)/release/$(NAME)" ~/usr/bin/$(NAME)
+install: release
+	cp target/$(TARGET)/release/$(NAME) ~/usr/bin/$(NAME)
 	@if test "$$(uname -s)" = Darwin; then \
 		codesign -fs - ~/usr/bin/$(NAME); \
 	fi
+
+scrl:
+	cargo build --release -p scrl
+
+# Run the curated rustybench suite and persist a host baseline (see benches/bench.rs
+# for what is measured and why).
+bench:
+	@$(RUSTYBENCH) baseline --root "$(CURDIR)" --baseline "$(CURDIR)/benches/baseline.json" -- cargo bench --bench bench
+
+# Compare a candidate baseline against the persisted host baseline.
+# Usage: make bench-diff AFTER=path/to/baseline.json
+bench-diff:
+	@BASELINE="$(CURDIR)/benches/baseline.json"; \
+	test -f "$$BASELINE" || { echo "no baseline yet; run 'make bench' first" >&2; exit 1; }; \
+	$(RUSTYBENCH) diff "$$BASELINE" "$(AFTER)"
