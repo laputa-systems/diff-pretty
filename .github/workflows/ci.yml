@@ -1,0 +1,33 @@
+---
+name: CI
+"on":
+  push: {}
+  pull_request: {}
+permissions:
+  contents: read
+concurrency:
+  group: "ci-${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: "${{ matrix.os }}"
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-26
+    defaults:
+      run:
+        shell: "bash -euo pipefail {0}"
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      -
+        name: Check all targets
+        run: cargo check --workspace --all-targets
+      -
+        name: Test workspace
+        run: cargo test --workspace
+...

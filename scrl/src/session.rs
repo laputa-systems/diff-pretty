@@ -12,11 +12,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::document::{Document, Range};
-use crate::search::SearchState;
+use crate::search::{SearchInput, SearchState};
 const RESET: &str = "\x1b[0m";
 #[cfg(all(feature = "terminal", unix))]
 use crate::terminal::{
-    RawMode, SignalGuard, read_event_tty, suspend, suspend_requested, terminated,
+    RawMode, SignalGuard, read_event_tty, read_event_tty_cancellable, suspend,
+    suspend_requested, terminated,
 };
 #[cfg(feature = "terminal")]
 use crate::{ChunkSource, ExitReason, RunOptions};
@@ -80,22 +81,89 @@ pub struct Session {
     wrap: bool,
     follow: bool,
     filter: Option<Regex>,
+    active_search_query: Option<String>,
     help: bool,
     finished: bool,
     frame: Vec<u8>,
     search_ranges: Vec<Vec<Range>>,
 }
 
+#[cfg(all(feature = "terminal", unix))]
+struct KeyReader {
+    cancelled: Arc<AtomicBool>,
+    receiver: Option<mpsc::Receiver<Event>>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(all(feature = "terminal", unix))]
+impl KeyReader {
+    fn spawn<R: io::Read + Send + 'static>(mut input: R) -> Self {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let (sender, receiver) = mpsc::sync_channel(8);
+        let worker = thread::spawn(move || loop {
+            match read_event_tty_cancellable(&mut input, &worker_cancelled) {
+                Ok(Some(event)) => {
+                    if sender.send(event).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) | Err(_) => break,
+            }
+        });
+        Self {
+            cancelled,
+            receiver: Some(receiver),
+            worker: Some(worker),
+        }
+    }
+
+    fn recv_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Event, mpsc::RecvTimeoutError> {
+        match &self.receiver {
+            Some(receiver) => receiver.recv_timeout(timeout),
+            None => Err(mpsc::RecvTimeoutError::Disconnected),
+        }
+    }
+
+    fn request_stop(&mut self) {
+        self.receiver.take();
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    fn join(&mut self) -> io::Result<()> {
+        if let Some(worker) = self.worker.take() {
+            worker
+                .join()
+                .map_err(|_| io::Error::other("pager key reader panicked"))?;
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self) -> io::Result<()> {
+        self.request_stop();
+        self.join()
+    }
+}
+
+#[cfg(all(feature = "terminal", unix))]
+impl Drop for KeyReader {
+    fn drop(&mut self) {
+        self.request_stop();
+        // Explicit shutdown reports worker panics; Drop only guarantees cleanup on early return.
+        let _ = self.join();
+    }
+}
+
 impl Session {
-    pub fn new(size: Size, options: SessionOptions) -> Self {
+    pub fn new(size: Size, options: SessionOptions) -> io::Result<Self> {
         let history = options.search_history.clone();
         let wrap = options.wrap;
         let follow = options.follow;
-        let filter = options
-            .filter
-            .as_deref()
-            .and_then(|query| Regex::new(query).ok());
-        Self {
+        let filter = compile_filter(&options)?;
+        Ok(Self {
             size,
             options,
             document: Document::default(),
@@ -106,28 +174,30 @@ impl Session {
             wrap,
             follow,
             filter,
+            active_search_query: None,
             help: false,
             finished: false,
             frame: Vec::with_capacity(size.rows.saturating_mul(size.columns).max(1024)),
             search_ranges: Vec::new(),
-        }
+        })
     }
 
     #[cfg(all(feature = "terminal", unix))]
-    pub(crate) fn from_document(document: Document, size: Size, options: SessionOptions) -> Self {
+    pub(crate) fn from_document(
+        document: Document,
+        size: Size,
+        options: SessionOptions,
+    ) -> io::Result<Self> {
         let history = options.search_history.clone();
         let wrap = options.wrap;
         let follow = options.follow;
-        let filter = options
-            .filter
-            .as_deref()
-            .and_then(|query| Regex::new(query).ok());
+        let filter = compile_filter(&options)?;
         let (display_document, source_document) = if let Some(pattern) = &filter {
             (document.filtered(pattern), Some(document))
         } else {
             (document, None)
         };
-        Self {
+        Ok(Self {
             size,
             options,
             document: display_document,
@@ -138,22 +208,33 @@ impl Session {
             wrap,
             follow,
             filter,
+            active_search_query: None,
             help: false,
             finished: true,
             frame: Vec::with_capacity(size.rows.saturating_mul(size.columns).max(1024)),
             search_ranges: Vec::new(),
-        }
+        })
     }
 
     pub fn push_chunk(&mut self, chunk: &str) {
         if !self.finished {
             let last_line = self.document.line_count().checked_sub(1);
-            if let Some(source_document) = &mut self.source_document {
-                source_document.append_for_session(chunk);
-                if let Some(pattern) = &self.filter {
-                    self.document = source_document.filtered(pattern);
-                    self.search.session = None;
-                }
+            if self.filter.is_some() {
+                self.source_document
+                    .as_mut()
+                    .expect("filtered sessions retain their source document")
+                    .append_for_session(chunk);
+                let selected = self.selected_search_match();
+                let pattern = self
+                    .filter
+                    .as_ref()
+                    .expect("filtered sessions retain their filter");
+                self.document = self
+                    .source_document
+                    .as_ref()
+                    .expect("filtered sessions retain their source document")
+                    .filtered(pattern);
+                self.rebuild_search_after_filter_change(selected);
             } else {
                 self.document.append_for_session(chunk);
             }
@@ -193,7 +274,13 @@ impl Session {
             match event {
                 Event::Interrupt => return Action::Quit,
                 Event::Escape => self.search.cancel(),
-                Event::Enter => self.search.submit(&self.document, self.finished),
+                Event::Enter => {
+                    let query = self.search.input.as_ref().map(|input| input.text.clone());
+                    self.search.submit(&self.document, self.finished);
+                    if self.search.input.is_none() {
+                        self.active_search_query = self.search.session.as_ref().and(query);
+                    }
+                }
                 Event::Backspace => self.search.backspace(),
                 Event::Delete => self.search.delete(),
                 Event::CtrlU => self.search.clear_input(),
@@ -407,6 +494,77 @@ impl Session {
     fn horizontal_shift(&self) -> usize {
         (self.size.columns / 2).max(1)
     }
+
+    fn selected_search_match(&mut self) -> Option<(usize, String, Range)> {
+        let (line, match_index) = self.search.session.as_ref()?.selected?;
+        let text = self.document.line_text(line)?.to_owned();
+        let range = self
+            .search
+            .session
+            .as_mut()?
+            .ranges(&self.document, line)
+            .get(match_index)
+            .copied()?;
+        Some((line, text, range))
+    }
+
+    fn rebuild_search_after_filter_change(
+        &mut self,
+        selected: Option<(usize, String, Range)>,
+    ) {
+        let Some(query) = self.active_search_query.clone() else {
+            return;
+        };
+        let pending_input = self.search.input.clone();
+        let pending_error = self.search.error.clone();
+        let forward = self.search.forward;
+        self.search.begin(forward);
+        self.search.input = Some(SearchInput {
+            cursor: query.len(),
+            text: query,
+        });
+        self.search.submit(&self.document, self.finished);
+        self.search.input = pending_input;
+        self.search.error = pending_error;
+
+        let (Some((old_line, old_text, old_range)), Some(search)) =
+            (selected, self.search.session.as_mut())
+        else {
+            return;
+        };
+        let mut closest = None::<(usize, usize, usize)>;
+        for line in 0..self.document.line_count() {
+            if self.document.line_text(line) != Some(old_text.as_str()) {
+                continue;
+            }
+            if let Some(match_index) = search
+                .ranges(&self.document, line)
+                .iter()
+                .position(|range| *range == old_range)
+            {
+                let distance = line.abs_diff(old_line);
+                if closest.is_none_or(|(best, _, _)| distance < best) {
+                    closest = Some((distance, line, match_index));
+                }
+            }
+        }
+        if let Some((_, line, match_index)) = closest {
+            search.selected = Some((line, match_index));
+        }
+    }
+}
+
+fn compile_filter(options: &SessionOptions) -> io::Result<Option<Regex>> {
+    options
+        .filter
+        .as_deref()
+        .map(Regex::new)
+        .transpose()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))
+}
+
+pub(crate) fn validate_options(options: &SessionOptions) -> io::Result<()> {
+    compile_filter(options).map(drop)
 }
 
 // This entry point intentionally contains only the generic runner policy. A
@@ -459,7 +617,7 @@ pub(crate) fn run_terminal<S: ChunkSource>(
         rows: 24,
         columns: 80,
     };
-    let mut session = Session::new(size, options.session);
+    let mut session = Session::new(size, options.session)?;
     let mut emit = |chunk: &str| {
         session.push_chunk(chunk);
         Ok(())
@@ -558,6 +716,7 @@ pub(crate) fn run_retained_terminal_with_tty(
     output: &mut dyn Write,
     tty: &std::fs::File,
 ) -> io::Result<ExitReason> {
+    validate_options(&options.session)?;
     let size = rustix::termios::tcgetwinsize(tty)
         .map(|size| Size {
             rows: usize::from(size.ws_row).max(1),
@@ -580,25 +739,12 @@ pub(crate) fn run_retained_terminal_with_tty(
             return Ok(ExitReason::EndOfInput);
         }
     };
+    let mut session = Session::from_document(document, size, options.session)?;
     let _signals = SignalGuard::install();
     let key_tty = tty
         .try_clone()
         .map_err(|error| io::Error::new(error.kind(), format!("clone pager tty: {error}")))?;
-    let (key_sender, key_receiver) = mpsc::sync_channel(8);
-    thread::spawn(move || {
-        let input = key_tty;
-        loop {
-            match read_event_tty(&mut &input) {
-                Ok(Some(event)) => {
-                    if key_sender.send(event).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) | Err(_) => break,
-            }
-        }
-    });
-    let mut session = Session::from_document(document, size, options.session);
+    let mut key_reader = KeyReader::spawn(key_tty);
     output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H")?;
     let mut result = session
         .draw(output)
@@ -612,7 +758,7 @@ pub(crate) fn run_retained_terminal_with_tty(
             result = session.draw(output);
             continue;
         }
-        match key_receiver.recv_timeout(Duration::from_millis(50)) {
+        match key_reader.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => match session.handle(event) {
                 Action::Quit => break,
                 Action::Continue { changed: true } => result = session.draw(output),
@@ -630,8 +776,12 @@ pub(crate) fn run_retained_terminal_with_tty(
         .write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")
         .and_then(|()| output.flush())
         .map_err(|error| io::Error::new(error.kind(), format!("cleanup pager output: {error}")));
+    let key_cleanup = key_reader.stop();
     drop(raw);
-    result.and(cleanup).map(|()| ExitReason::Quit)
+    result
+        .and(key_cleanup)
+        .and(cleanup)
+        .map(|()| ExitReason::Quit)
 }
 
 #[cfg(all(feature = "terminal", unix))]
@@ -671,6 +821,7 @@ fn run_terminal_live<S: ChunkSource>(
             rows: 24,
             columns: 80,
         });
+    let mut session = Session::new(size, options.session)?;
     #[cfg(unix)]
     let raw = match RawMode::enter(&tty) {
         Ok(raw) => raw,
@@ -702,27 +853,9 @@ fn run_terminal_live<S: ChunkSource>(
         let _ = sender.send(LoadEvent::Finished(result));
     });
 
-    let (key_sender, key_receiver) = mpsc::sync_channel(8);
-    let key_cancelled = Arc::clone(&cancelled);
     let key_tty = tty.try_clone()?;
-    thread::spawn(move || {
-        let input = key_tty;
-        loop {
-            if key_cancelled.load(Ordering::Relaxed) {
-                break;
-            }
-            match read_event_tty(&mut &input) {
-                Ok(Some(event)) => {
-                    if key_sender.send(event).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) | Err(_) => break,
-            }
-        }
-    });
+    let mut key_reader = KeyReader::spawn(key_tty);
 
-    let mut session = Session::new(size, options.session);
     let auto = matches!(options.paging, crate::PagingMode::Auto) && !session.follow;
     let mut pager_started = !auto;
     let mut last_draw = None;
@@ -839,7 +972,7 @@ fn run_terminal_live<S: ChunkSource>(
             continue;
         }
 
-        match key_receiver.recv_timeout(Duration::from_millis(50)) {
+        match key_reader.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
                 let pull = source_pull_request(&session, finished, event);
                 let mut loaded = false;
@@ -914,6 +1047,7 @@ fn run_terminal_live<S: ChunkSource>(
         }
     }
     cancelled.store(true, Ordering::Relaxed);
+    let key_cleanup = key_reader.stop();
     let cleanup = if pager_started {
         output
             .write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")
@@ -923,7 +1057,7 @@ fn run_terminal_live<S: ChunkSource>(
     };
     #[cfg(unix)]
     drop(raw);
-    result.and(cleanup).map(|()| {
+    result.and(key_cleanup).and(cleanup).map(|()| {
         if quit {
             ExitReason::Quit
         } else {
@@ -1014,7 +1148,39 @@ mod tests {
                 follow: false,
                 filter: None,
             },
-        )
+    )
+    .unwrap_or_else(|error| panic!("valid test options: {error}"))
+    }
+
+    #[cfg(all(feature = "terminal", unix))]
+    #[test]
+    fn key_reader_cancellation_unblocks_and_joins_the_worker() {
+        struct WaitingReader {
+            started: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+
+        impl io::Read for WaitingReader {
+            fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+                self.started.send(()).unwrap();
+                self.release.recv().unwrap();
+                Ok(0)
+            }
+        }
+
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let mut key_reader = KeyReader::spawn(WaitingReader {
+            started: started_sender,
+            release: release_receiver,
+        });
+        started_receiver.recv().unwrap();
+
+        key_reader.request_stop();
+        release_sender.send(()).unwrap();
+        key_reader.join().unwrap();
+
+        assert!(key_reader.worker.is_none());
     }
 
     #[test]
@@ -1121,7 +1287,8 @@ mod tests {
                 follow: false,
                 filter: None,
             },
-        );
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
         pager.handle(Event::Text('/'));
         for character in "éx".chars() {
             pager.handle(Event::Text(character));
@@ -1253,7 +1420,8 @@ mod tests {
                 follow: false,
                 filter: None,
             },
-        );
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
         pager.push_chunk("abcdefghij\nx\n");
         pager.finish();
         assert_eq!(pager.max_top(), 2);
@@ -1275,13 +1443,77 @@ mod tests {
                 follow: false,
                 filter: Some("keep".into()),
             },
-        );
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
         pager.push_chunk("drop one\nkeep first\n");
         pager.push_chunk("keep second\ndrop two\n");
         assert_eq!(pager.document.line_count(), 3);
         assert_eq!(pager.document.line_text(0), Some("keep first"));
         assert_eq!(pager.document.line_text(1), Some("keep second"));
         assert_eq!(pager.document.line_text(2), Some(""));
+    }
+
+    #[test]
+    fn filtered_rebuild_preserves_search_selection_highlights_and_next_match() {
+        let mut pager = Session::new(
+            Size {
+                rows: 4,
+                columns: 40,
+            },
+            SessionOptions {
+                title: "test".into(),
+                search_history: Vec::new(),
+                wrap: false,
+                follow: false,
+                filter: Some("keep".into()),
+            },
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
+        pager.push_chunk("drop skip\nkeep alpha\nkeep beta\n");
+        pager.handle(Event::Text('/'));
+        for character in "beta".chars() {
+            pager.handle(Event::Text(character));
+        }
+        pager.handle(Event::Enter);
+        assert_eq!(
+            pager.search.session.as_ref().unwrap().selected_line(),
+            Some(1)
+        );
+
+        pager.push_chunk("keep beta later\n");
+
+        let search = pager.search.session.as_mut().expect("search stays active");
+        assert_eq!(search.selected_line(), Some(1));
+        assert_eq!(search.ranges(&pager.document, 1).len(), 1);
+        let mut output = Vec::new();
+        pager.draw(&mut output).unwrap();
+        assert!(output
+            .windows(b"\x1b[48;5;226;30mbeta\x1b[0m".len())
+            .any(|window| window == b"\x1b[48;5;226;30mbeta\x1b[0m"));
+
+        pager.handle(Event::Text('n'));
+        assert_eq!(
+            pager.search.session.as_ref().unwrap().selected_line(),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn invalid_filter_is_returned_as_a_configuration_error() {
+        let error = Session::new(
+            Size {
+                rows: 4,
+                columns: 40,
+            },
+            SessionOptions {
+                filter: Some("[".into()),
+                ..SessionOptions::default()
+            },
+        )
+        .err()
+        .expect("invalid filter must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.get_ref().is_some());
     }
 
     #[test]
@@ -1298,7 +1530,8 @@ mod tests {
                 follow: true,
                 filter: None,
             },
-        );
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
         pager.push_chunk("one\ntwo\nthree\n");
         assert_eq!(pager.top, 2);
         pager.push_chunk("four\n");

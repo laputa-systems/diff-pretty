@@ -59,13 +59,17 @@ assert_eq!(document.line_text(1), Some("red"));
 let mut session = Session::new(
     Size { rows: 24, columns: 80 },
     SessionOptions::default(),
-);
+)
+.expect("valid session options");
 session.push_chunk("one\ntwo\n");
 session.finish();
 ```
 
 `SessionOptions` supplies the title, optional search history, wrapping, follow
-mode, and line filter. `RunOptions` pairs it with `PagingMode`. `ReaderSource`,
+mode, and line filter. `Session::new` returns `io::Result` and reports an
+invalid filter as `InvalidInput`; `run_reader`, `run_source`, and `run_document`
+validate filters even when output is redirected. `RunOptions` pairs session
+options with `PagingMode`. `ReaderSource`,
 `FileSource`, and `FilesSource` implement `ChunkSource`; `run_reader` and
 `run_source` run those sources, while `run_document` displays an existing
 document. `Session` exposes `handle`, `advance`, `draw`, and `document` for

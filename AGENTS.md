@@ -11,7 +11,7 @@ Rust renderer for Git-style unified diffs with an optional built-in pager.
 ## Invariants
 
 - Rendering is deterministic, uses fixed ANSI styles, and does not read terminal dimensions or user configuration.
-- The renderer passes unsupported leading metadata through and restyles parsed diff content.
+- The renderer preserves ordinary leading metadata, removes its terminal controls, and restyles parsed diff content.
 - Diff pager chunks keep each file together so word-diff pairing has complete file context.
 - `scrl` remains independent of the renderer; redirected output never enters the pager or emits screen controls.
 - Neither executable reads `$PAGER` or invokes an external pager.

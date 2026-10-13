@@ -58,6 +58,7 @@ pub fn run_reader<R: BufRead + Send + 'static>(
 /// Run a chunk producer. A non-terminal has no interactive pager, regardless
 /// of `always`; this is what keeps redirected output free of screen controls.
 pub fn run_source<S: ChunkSource>(source: S, options: RunOptions) -> io::Result<ExitReason> {
+    session::validate_options(&options.session)?;
     let stdout = io::stdout();
     let mut output = stdout.lock();
     if options.paging == PagingMode::Never || !output.is_terminal() {
@@ -85,6 +86,7 @@ pub fn run_source<S: ChunkSource>(source: S, options: RunOptions) -> io::Result<
 
 /// Run an already-retained document without serializing it first.
 pub fn run_document(document: &Document, options: RunOptions) -> io::Result<ExitReason> {
+    session::validate_options(&options.session)?;
     let stdout = io::stdout();
     let mut output = stdout.lock();
     if options.paging == PagingMode::Never || !output.is_terminal() {
@@ -146,5 +148,23 @@ mod tests {
         assert!(output.windows(4).any(|window| window == b"safe"));
         assert!(!output.windows(4).any(|window| window == b"2Jsa"));
         assert!(!output.windows(2).any(|window| window == b"\x1b]"));
+    }
+
+    #[test]
+    fn invalid_filter_is_reported_before_direct_output() {
+        let error = run_source(
+            ReaderSource::new(Cursor::new("input\n")),
+            RunOptions {
+                paging: PagingMode::Never,
+                session: SessionOptions {
+                    filter: Some("[".into()),
+                    ..SessionOptions::default()
+                },
+            },
+        )
+        .err()
+        .expect("invalid filter must fail before direct output");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.get_ref().is_some());
     }
 }

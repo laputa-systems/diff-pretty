@@ -172,7 +172,7 @@ impl RenderSession {
 
     fn push_patch_line_streaming(&mut self, line: &str, output: &mut String) {
         let mut stripped = String::new();
-        strip_sgr_append(line.trim_end_matches(['\r', '\n']), &mut stripped);
+        strip_terminal_controls_append(line.trim_end_matches(['\r', '\n']), &mut stripped);
         let starts_file = stripped.starts_with("diff --git");
         let starts_commit = is_commit_header(&stripped);
 
@@ -613,7 +613,7 @@ pub(crate) fn for_each_render_chunk<R: BufRead>(
             break;
         }
         stripped.clear();
-        strip_sgr_append(line.trim_end_matches(['\r', '\n']), &mut stripped);
+        strip_terminal_controls_append(line.trim_end_matches(['\r', '\n']), &mut stripped);
         let starts_file = stripped.starts_with("diff --git");
         let starts_section = starts_file || is_commit_header(&stripped);
         if starts_section && !chunk.is_empty() {
@@ -680,10 +680,10 @@ fn render_chunk(
     state: &mut RenderState,
     final_chunk: bool,
 ) {
-    // git colorizes the diff it sends to its pager, so the input carries CSI
-    // SGR codes. Keep raw (possibly colored) lines for metadata passthrough and
-    // a stripped copy for parsing; hunk lines are restyled regardless of input
-    // color.
+    // Git colorizes diffs sent to its pager, so the input carries CSI SGR
+    // codes. Keep raw lines for metadata passthrough, filtering terminal
+    // controls there, and use a stripped copy for parsing; hunk lines are
+    // restyled regardless of input color.
     let raw_lines: Vec<&str> = input.lines().collect();
     // The stripped copy is borrowed where possible. Plain inputs (no ESC) borrow
     // `raw_lines` directly and allocate nothing; colorized inputs are stripped
@@ -697,7 +697,7 @@ fn render_chunk(
         let mut ranges: Vec<(usize, usize)> = Vec::with_capacity(raw_lines.len());
         for l in &raw_lines {
             let start = scratch.len();
-            strip_sgr_append(l, &mut scratch);
+            strip_terminal_controls_append(l, &mut scratch);
             ranges.push((start, scratch.len()));
         }
         Cow::Owned(
@@ -741,8 +741,7 @@ fn render_chunk(
     } else {
         // ---- commit / leading verbatim block ----
         while i < lines.len() && !lines[i].starts_with("diff --git") {
-            out.push_str(raw_lines[i]);
-            out.push('\n');
+            push_metadata_line(out, raw_lines[i]);
             i += 1;
         }
     }
@@ -751,7 +750,7 @@ fn render_chunk(
         let line = &lines[i];
 
         if line.starts_with("diff --git") {
-            if !final_chunk && let Some(fi) = pending_file.take() {
+            if let Some(fi) = pending_file.take() {
                 emit_file_decoration(out, &fi, None);
             }
             *pending_file = Some(FileInfo::from_diff_line(line));
@@ -785,12 +784,10 @@ fn render_chunk(
             if let Some(fi) = pending_file.take() {
                 emit_file_decoration(out, &fi, None);
             }
-            out.push_str(raw_lines[i]);
-            out.push('\n');
+            push_metadata_line(out, raw_lines[i]);
             i += 1;
             while i < lines.len() && !lines[i].starts_with("diff --git") {
-                out.push_str(raw_lines[i]);
-                out.push('\n');
+                push_metadata_line(out, raw_lines[i]);
                 i += 1;
             }
             continue;
@@ -1124,26 +1121,108 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {
     Cow::Owned(s.replace('\t', TAB_STOP))
 }
 
-/// Remove CSI SGR escape sequences (`ESC [ ... m`) from a line, so git's
-/// colorized pager input can be parsed the same as plain input. The stripped
-/// content is appended to `scratch`, a single buffer shared by every line, so
-/// colorized input costs one allocation total.
-fn strip_sgr_append(s: &str, scratch: &mut String) {
-    if !s.as_bytes().contains(&b'\x1b') {
+/// Remove terminal control sequences and bare controls from parser input,
+/// except tabs, which the renderer expands in hunk content.
+fn strip_terminal_controls_append(s: &str, scratch: &mut String) {
+    if !s.as_bytes().contains(&b'\x1b')
+        && !s.chars().any(|character| character.is_control() && character != '\t')
+    {
         scratch.push_str(s);
         return;
     }
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            for c2 in chars.by_ref() {
-                if c2 == 'm' {
-                    break;
+    let bytes = s.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0x1b
+            && let Some((end, _)) = terminal_control_end(bytes, index)
+        {
+            index = end;
+            continue;
+        }
+
+        let character = s[index..].chars().next().expect("valid UTF-8 input");
+        if !character.is_control() || character == '\t' {
+            scratch.push(character);
+        }
+        index += character.len_utf8();
+    }
+}
+
+/// Preserve ordinary metadata while dropping terminal controls that could
+/// move the cursor, change modes, or alter terminal state.
+fn push_metadata_line(out: &mut impl RenderSink, line: &str) {
+    let bytes = line.as_bytes();
+    let mut index = 0;
+    let mut text_start = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0x1b {
+            out.push_str(&line[text_start..index]);
+            if let Some((end, _)) = terminal_control_end(bytes, index) {
+                index = end;
+            } else {
+                index += 1;
+            }
+            text_start = index;
+            continue;
+        }
+
+        let character = line[index..].chars().next().expect("valid UTF-8 input");
+        if character.is_control() && character != '\t' {
+            out.push_str(&line[text_start..index]);
+            index += character.len_utf8();
+            text_start = index;
+        } else {
+            index += character.len_utf8();
+        }
+    }
+    out.push_str(&line[text_start..]);
+    out.push('\n');
+}
+
+/// Return the end of an ANSI control and whether it is a syntactically valid
+/// SGR sequence. Incomplete CSI and string controls stop at the line boundary.
+fn terminal_control_end(bytes: &[u8], start: usize) -> Option<(usize, bool)> {
+    if bytes.get(start) != Some(&0x1b) {
+        return None;
+    }
+    match bytes.get(start + 1).copied() {
+        Some(b'[') => {
+            let mut in_intermediate = false;
+            for end in start + 2..bytes.len() {
+                let byte = bytes[end];
+                if (0x40..=0x7e).contains(&byte) {
+                    let body = &bytes[start + 2..end];
+                    let sgr_parameters = body
+                        .iter()
+                        .all(|&byte| byte.is_ascii_digit() || matches!(byte, b';' | b':'));
+                    return Some((end + 1, byte == b'm' && sgr_parameters));
+                }
+                if !in_intermediate && (0x30..=0x3f).contains(&byte) {
+                    continue;
+                }
+                if (0x20..=0x2f).contains(&byte) {
+                    in_intermediate = true;
+                    continue;
+                }
+                return Some((start + 1, false));
+            }
+            Some((start + 1, false))
+        }
+        Some(b']' | b'P' | b'^' | b'_' | b'X') => {
+            let string_control = bytes[start + 1];
+            for end in start + 2..bytes.len() {
+                if string_control == b']' && bytes[end] == 0x07 {
+                    return Some((end + 1, false));
+                }
+                if bytes[end] == 0x1b && bytes.get(end + 1) == Some(&b'\\') {
+                    return Some((end + 2, false));
                 }
             }
-        } else {
-            scratch.push(c);
+            Some((start + 1, false))
         }
+        Some(next) if next.is_ascii() => Some((start + 2, false)),
+        Some(_) => Some((start + 1, false)),
+        None => Some((start + 1, false)),
     }
 }
 
@@ -1355,6 +1434,79 @@ mod tests {
         document.write_to(&mut output).unwrap();
 
         assert_eq!(output, render(input).as_bytes());
+    }
+
+    #[test]
+    fn whole_buffer_renderer_flushes_rename_before_next_file() {
+        let input = concat!(
+            "commit 0123456\nmessage\n",
+            "diff --git a/old b/new\n",
+            "similarity index 100%\nrename from old\nrename to new\n",
+            "diff --git a/middle b/final\n",
+            "similarity index 100%\nrename from middle\nrename to final\n",
+        );
+        let border = "────────────────────────────────────────────────────────────────────────────────";
+        let expected = format!(
+            "commit 0123456\nmessage\n\n\x1b[34mrenamed: old ⟶   new\x1b[0m\n\x1b[34m{border}\x1b[0m\n\n\x1b[34mrenamed: middle ⟶   final\x1b[0m\n\x1b[34m{border}\x1b[0m\n"
+        );
+
+        let mut whole_buffer = Vec::new();
+        render_to(input, &mut whole_buffer).unwrap();
+        assert_eq!(whole_buffer, expected.as_bytes());
+        assert_eq!(render(input), expected);
+
+        let mut streamed = Vec::new();
+        render_reader_to(input.as_bytes(), &mut streamed).unwrap();
+        assert_eq!(streamed, expected.as_bytes());
+    }
+
+    #[test]
+    fn public_render_to_matches_byte_exact_hunk_oracle() {
+        let input = concat!(
+            "diff --git a/a b/a\n",
+            "--- a/a\n+++ b/a\n",
+            "@@ -1 +1 @@\n-old\n+new\n",
+        );
+        let expected = concat!(
+            "\n\x1b[34mΔ a\x1b[0m\n",
+            "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n",
+            "\n",
+            "\x1b[34m\x1b[38;5;88m  1 \x1b[34m\x1b[38;5;28m    \x1b[34m\x1b[31mold\x1b[0m\n",
+            "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32mnew\x1b[0m\n",
+        );
+        let mut actual = Vec::new();
+        render_to(input, &mut actual).unwrap();
+        assert_eq!(actual, expected.as_bytes());
+    }
+
+    #[test]
+    fn direct_metadata_keeps_text_but_drops_terminal_controls() {
+        let input = concat!(
+            "\x1b[32munsupported metadata\x1b[0m ",
+            "\x1b]0;changed title\x07",
+            "\x1b[2J\x1bé\n",
+        );
+        let expected = "unsupported metadata é\n";
+        let mut actual = Vec::new();
+        render_to(input, &mut actual).unwrap();
+        assert_eq!(actual, expected.as_bytes());
+    }
+
+    #[test]
+    fn hunk_content_drops_non_sgr_and_bare_terminal_controls() {
+        let input = concat!(
+            "diff --git a/a b/a\n--- a/a\n+++ b/a\n",
+            "@@ -0,0 +1 @@\n",
+            "+before\x07\x7f\x1b[2J\x1béafter\n",
+        );
+        let mut actual = Vec::new();
+        render_to(input, &mut actual).unwrap();
+        let actual = String::from_utf8(actual).unwrap();
+
+        assert!(actual.contains("beforeéafter"));
+        assert!(!actual.contains('\x07'));
+        assert!(!actual.contains('\x7f'));
+        assert!(!actual.contains("\x1b[2J"));
     }
 
     #[test]

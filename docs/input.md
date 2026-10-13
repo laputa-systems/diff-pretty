@@ -4,11 +4,11 @@
 ordinary Git file headers, unified hunks, additions, deletions, renames,
 binary-file notices, multi-commit streams, and plain `diff -u` input.
 
-Within recognized diffs, SGR color sequences are removed before parsing and
-the content is rendered with diff-pretty's styles. Leading metadata that is
-not recognized as a diff is passed through unchanged apart from line-ending
-handling. File-header metadata that does not render as a hunk or decoration is
-ignored.
+Within recognized diffs, valid SGR color sequences are removed before parsing
+and the content is rendered with diff-pretty's styles. Other terminal controls
+are removed from diff content. Leading metadata that is not recognized as a
+diff keeps its ordinary text, while terminal controls are removed. File-header
+metadata that does not render as a hunk or decoration is ignored.
 
 These modes are not rendered as diffs:
 

@@ -21,9 +21,20 @@ pub(crate) struct Cell {
     cost: usize,
 }
 
+/// Aligns two token sequences while keeping the cached table consistent with
+/// their lengths.
+///
+/// Token sequences are exposed read-only; change them together with the table
+/// by calling [`reset_lines`](Self::reset_lines).
+///
+/// ```compile_fail
+/// use diff_pretty::align::Alignment;
+/// let mut alignment = Alignment::new(vec!["old"], vec!["new"]);
+/// alignment.x.push("extra");
+/// ```
 pub struct Alignment<'a> {
-    pub x: Vec<&'a str>,
-    pub y: Vec<&'a str>,
+    x: Vec<&'a str>,
+    y: Vec<&'a str>,
     table: Vec<Cell>,
     dim: [usize; 2],
 }
@@ -31,6 +42,16 @@ pub struct Alignment<'a> {
 impl<'a> Alignment<'a> {
     pub fn new(x: Vec<&'a str>, y: Vec<&'a str>) -> Self {
         Self::with_cells(x, y, Vec::new())
+    }
+
+    /// Returns the tokens in the first sequence.
+    pub fn x_tokens(&self) -> &[&'a str] {
+        &self.x
+    }
+
+    /// Returns the tokens in the second sequence.
+    pub fn y_tokens(&self) -> &[&'a str] {
+        &self.y
     }
 
     /// Build an alignment whose table reuses a caller-owned `cells` allocation,

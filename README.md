@@ -27,7 +27,8 @@ diff-pretty --paging=never < changes.patch
 Paging options are `--paging=auto`, `--paging=always`, and `--paging=never`;
 `--no-pager` is an alias for `never`. The default is `always`: an interactive
 terminal opens the built-in pager, while redirected output is written directly.
-`auto` opens the pager only when terminal output exceeds one screen.
+`auto` opens the pager only when terminal output exceeds one screen. Any other
+`--paging` value is an error.
 
 The renderer uses an 80-column file underline. Hunk content is not wrapped or
 clipped, so long lines can exceed the terminal width; the pager clips them at

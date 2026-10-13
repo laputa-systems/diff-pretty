@@ -134,7 +134,7 @@ fn annotate<'a>(
                     n,
                     &mut minus_line_offset,
                     &mut x_offset,
-                    &alignment.x,
+                    alignment.x_tokens(),
                     minus_line,
                 );
                 let n_d = width(ms.trim()) as f64;
@@ -148,7 +148,7 @@ fn annotate<'a>(
                     n,
                     &mut minus_line_offset,
                     &mut x_offset,
-                    &alignment.x,
+                    alignment.x_tokens(),
                     minus_line,
                 );
                 let n_d = width(ms.trim()) as f64;
@@ -157,14 +157,15 @@ fn annotate<'a>(
                 let coalesce = is_space
                     && ((minus_op_prev
                         && plus_op_prev
-                        && (x_offset < alignment.x.len() - 1 || y_offset < alignment.y.len() - 1))
+                        && (x_offset < alignment.x_tokens().len() - 1
+                            || y_offset < alignment.y_tokens().len() - 1))
                         || (!minus_op_prev && !plus_op_prev));
                 annotated_minus.push((if coalesce { minus_op_prev } else { false }, ms));
                 let ps = get_section(
                     n,
                     &mut plus_line_offset,
                     &mut y_offset,
-                    &alignment.y,
+                    alignment.y_tokens(),
                     plus_line,
                 );
                 let op = if coalesce { plus_op_prev } else { false };
@@ -182,7 +183,7 @@ fn annotate<'a>(
                     n,
                     &mut plus_line_offset,
                     &mut y_offset,
-                    &alignment.y,
+                    alignment.y_tokens(),
                     plus_line,
                 );
                 let n_d = width(ps.trim()) as f64;

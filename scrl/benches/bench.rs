@@ -52,7 +52,8 @@ fn session(document_text: &str) -> Session {
             follow: false,
             filter: None,
         },
-    );
+    )
+    .unwrap_or_else(|error| panic!("valid benchmark options: {error}"));
     pager.push_chunk(document_text);
     pager.finish();
     pager
@@ -171,7 +172,8 @@ fn live_search_chunk_and_redraw(bencher: Bencher) {
                 follow: false,
                 filter: None,
             },
-        );
+        )
+        .unwrap_or_else(|error| panic!("valid benchmark options: {error}"));
         pager.push_chunk(&first);
         pager.handle(Event::Text('/'));
         for character in "changed_token_0002".chars() {

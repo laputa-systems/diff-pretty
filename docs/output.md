@@ -2,6 +2,10 @@
 
 The renderer uses fixed styles and does not read terminal dimensions or configuration. File-decoration underlines are 80 columns wide. Hunk content remains unwrapped and can exceed 80 columns.
 
+Terminal controls from input are removed. Valid SGR sequences in recognized
+diffs are stripped before the renderer applies its own styles. Ordinary leading
+metadata is preserved without input styling or other terminal controls.
+
 Each hunk line has old and new line-number cells, each at least four columns
 wide. Larger line-number ranges use wider cells. The cells have blue borders.
 Context numbers are gray, removed numbers dark red, and added numbers dark

@@ -1,9 +1,15 @@
 use std::io::{self, Read};
-#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use crate::Event;
+
+#[cfg(target_os = "linux")]
+const SIGTSTP: std::ffi::c_int = 20;
+#[cfg(target_os = "macos")]
+const SIGTSTP: std::ffi::c_int = 18;
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+compile_error!("scrl terminal signal handling supports Linux and macOS");
 
 #[cfg(unix)]
 static TERMINATED: AtomicBool = AtomicBool::new(false);
@@ -40,7 +46,7 @@ impl SignalGuard {
         // SIGTERM is delivered asynchronously; the handler only flips an
         // atomic. The owning loop observes it and performs normal cleanup.
         let previous_term = unsafe { signal(15, handle_term as *const () as usize) };
-        let previous_tstp = unsafe { signal(20, handle_tstp as *const () as usize) };
+        let previous_tstp = unsafe { signal(SIGTSTP, handle_tstp as *const () as usize) };
         Self {
             previous_term,
             previous_tstp,
@@ -53,7 +59,7 @@ impl Drop for SignalGuard {
     fn drop(&mut self) {
         unsafe {
             signal(15, self.previous_term);
-            signal(20, self.previous_tstp);
+            signal(SIGTSTP, self.previous_tstp);
         }
     }
 }
@@ -74,12 +80,12 @@ pub(crate) fn suspend<W: io::Write + ?Sized>(output: &mut W, raw: &RawMode<'_>) 
     output.flush()?;
     raw.restore();
     unsafe {
-        signal(20, 0);
-        raise(20);
+        signal(SIGTSTP, 0);
+        raise(SIGTSTP);
     }
     raw.reenter()?;
     unsafe {
-        signal(20, handle_tstp as *const () as usize);
+        signal(SIGTSTP, handle_tstp as *const () as usize);
     }
     output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H")?;
     output.flush()
@@ -87,15 +93,27 @@ pub(crate) fn suspend<W: io::Write + ?Sized>(output: &mut W, raw: &RawMode<'_>) 
 
 #[cfg(test)]
 pub(crate) fn read_event<R: Read>(input: &mut R) -> io::Result<Option<Event>> {
-    read_event_inner(input, false)
+    read_event_inner(input, false, None)
 }
 
 #[cfg(unix)]
 pub(crate) fn read_event_tty<R: Read>(input: &mut R) -> io::Result<Option<Event>> {
-    read_event_inner(input, true)
+    read_event_inner(input, true, None)
 }
 
-fn read_event_inner<R: Read>(input: &mut R, timeout_is_idle: bool) -> io::Result<Option<Event>> {
+#[cfg(unix)]
+pub(crate) fn read_event_tty_cancellable<R: Read>(
+    input: &mut R,
+    cancelled: &AtomicBool,
+) -> io::Result<Option<Event>> {
+    read_event_inner(input, true, Some(cancelled))
+}
+
+fn read_event_inner<R: Read>(
+    input: &mut R,
+    timeout_is_idle: bool,
+    cancelled: Option<&AtomicBool>,
+) -> io::Result<Option<Event>> {
     let mut decoder = KeyDecoder::new();
     let mut byte = [0; 1];
     loop {
@@ -103,6 +121,9 @@ fn read_event_inner<R: Read>(input: &mut R, timeout_is_idle: bool) -> io::Result
         if count == 0 {
             if !timeout_is_idle {
                 return Ok(decoder.finish());
+            }
+            if cancelled.is_some_and(|cancelled| cancelled.load(Ordering::Relaxed)) {
+                return Ok(None);
             }
             if let Some(event) = decoder.timed_out(Instant::now()) {
                 return Ok(Some(event));
@@ -336,5 +357,42 @@ mod tests {
         decoder.push(0x1b);
         assert_eq!(decoder.next(), None);
         assert_eq!(decoder.timed_out(Instant::now()), Some(Event::Escape));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn suspend_signal_matches_darwin() {
+        assert_eq!(SIGTSTP, 18);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn suspend_signal_matches_linux() {
+        assert_eq!(SIGTSTP, 20);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn idle_tty_read_observes_cancellation_after_timeout() {
+        struct CancellingIdleReader<'a> {
+            cancelled: &'a AtomicBool,
+            reads: usize,
+        }
+
+        impl Read for CancellingIdleReader<'_> {
+            fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+                self.reads += 1;
+                self.cancelled.store(true, Ordering::Relaxed);
+                Ok(0)
+            }
+        }
+
+        let cancelled = AtomicBool::new(false);
+        let mut input = CancellingIdleReader {
+            cancelled: &cancelled,
+            reads: 0,
+        };
+        assert_eq!(read_event_tty_cancellable(&mut input, &cancelled).unwrap(), None);
+        assert_eq!(input.reads, 1);
     }
 }

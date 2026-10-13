@@ -10,6 +10,9 @@ cargo check --workspace --all-targets
 
 `make test` runs workspace tests in release mode. `make test-ci` is the quiet release-mode test command used by the release workflow.
 
+The CI workflow runs `cargo check --workspace --all-targets` and
+`cargo test --workspace` on pushes and pull requests for Linux and macOS.
+
 ## Benchmarks
 
 `make bench` runs the curated root suite through rustybench and saves a local,

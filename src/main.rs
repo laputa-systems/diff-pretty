@@ -3,24 +3,31 @@ use std::io::{BufReader, Write};
 use diff_pretty::source::{PagingMode, emit_reader, should_use_pager};
 
 /// Parse `--paging=auto|always|never` (or `--no-pager`). Default `always`.
-fn parse_paging() -> PagingMode {
-    for arg in std::env::args() {
+fn parse_paging(arguments: impl IntoIterator<Item = String>) -> Result<PagingMode, String> {
+    for arg in arguments {
         if let Some(v) = arg.strip_prefix("--paging=") {
             return match v {
-                "always" => PagingMode::Always,
-                "never" => PagingMode::Never,
-                _ => PagingMode::Auto,
+                "always" => Ok(PagingMode::Always),
+                "never" => Ok(PagingMode::Never),
+                "auto" => Ok(PagingMode::Auto),
+                _ => Err(format!("invalid paging mode: {v}")),
             };
         }
         if arg == "--no-pager" {
-            return PagingMode::Never;
+            return Ok(PagingMode::Never);
         }
     }
-    PagingMode::Always
+    Ok(PagingMode::Always)
 }
 
 fn main() {
-    let mode = parse_paging();
+    let mode = match parse_paging(std::env::args().skip(1)) {
+        Ok(mode) => mode,
+        Err(error) => {
+            eprintln!("diff-pretty: {error}");
+            std::process::exit(2);
+        }
+    };
     let result = if should_use_pager(mode) {
         emit_reader(BufReader::new(std::io::stdin()), mode)
     } else {

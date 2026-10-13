@@ -7,7 +7,7 @@ The workspace has two packages. The root `diff-pretty` package parses and render
 - `src/lib.rs` exports the render API and the `WIDTH` constant.
 - `src/render.rs` parses patches, styles output, and provides string, writer, reader, and retained-document entry points.
 - `src/config.rs` defines ANSI styles and number formatting.
-- `src/align.rs` implements sequence alignment; `src/edits.rs` pairs removed and added lines and infers word changes.
+- `src/align.rs` implements sequence alignment and exposes its token sequences read-only so cached tables remain consistent; `src/edits.rs` pairs removed and added lines and infers word changes.
 - `src/source.rs` adapts rendered chunks to `scrl`.
 
 ## Pager

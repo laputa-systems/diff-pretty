@@ -423,22 +423,57 @@ fn control_end(bytes: &[u8], start: usize) -> Option<(usize, bool)> {
     }
     match bytes.get(start + 1).copied() {
         Some(b'[') => {
-            let final_offset = bytes[start + 2..]
-                .iter()
-                .position(|byte| (0x40..=0x7e).contains(byte))?;
-            let end = start + 3 + final_offset;
-            Some((end, bytes[end - 1] == b'm'))
+            let mut in_intermediate = false;
+            for end in start + 2..bytes.len() {
+                let byte = bytes[end];
+                if byte == b'\n' {
+                    return Some((start + 1, false));
+                }
+                if (0x40..=0x7e).contains(&byte) {
+                    let body = &bytes[start + 2..end];
+                    let sgr_parameters = body
+                        .iter()
+                        .all(|&byte| byte.is_ascii_digit() || matches!(byte, b';' | b':'));
+                    return Some((end + 1, byte == b'm' && sgr_parameters));
+                }
+                if !in_intermediate && (0x30..=0x3f).contains(&byte) {
+                    continue;
+                }
+                if (0x20..=0x2f).contains(&byte) {
+                    in_intermediate = true;
+                    continue;
+                }
+                return Some((start + 1, false));
+            }
+            Some((start + 1, false))
         }
         Some(b']') => {
-            let rest = &bytes[start + 2..];
-            if let Some(offset) = rest.iter().position(|&byte| byte == 0x07) {
-                Some((start + 3 + offset, false))
-            } else {
-                let offset = rest.windows(2).position(|pair| pair == [0x1b, b'\\'])?;
-                Some((start + 2 + offset + 2, false))
+            for end in start + 2..bytes.len() {
+                if bytes[end] == b'\n' {
+                    return Some((start + 1, false));
+                }
+                if bytes[end] == 0x07 {
+                    return Some((end + 1, false));
+                }
+                if bytes[end] == 0x1b && bytes.get(end + 1) == Some(&b'\\') {
+                    return Some((end + 2, false));
+                }
             }
+            Some((start + 1, false))
         }
-        Some(_) => Some((start + 2, false)),
+        Some(b'P' | b'^' | b'_' | b'X') => {
+            for end in start + 2..bytes.len() {
+                if bytes[end] == b'\n' {
+                    return Some((start + 1, false));
+                }
+                if bytes[end] == 0x1b && bytes.get(end + 1) == Some(&b'\\') {
+                    return Some((end + 2, false));
+                }
+            }
+            Some((start + 1, false))
+        }
+        Some(next) if next.is_ascii() => Some((start + 2, false)),
+        Some(_) => Some((start + 1, false)),
         None => Some((start + 1, false)),
     }
 }
@@ -511,5 +546,35 @@ impl SgrState {
             write!(output, "\x1b[{code}m")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DocumentBuilder;
+
+    #[test]
+    fn malformed_csi_stops_at_newline_and_is_not_replayed_as_sgr() {
+        let mut builder = DocumentBuilder::new();
+        builder.push_str(
+            "\x1b[31\nmvisible\x1b[32mgreen\n\x1b[?31mprivate\nbefore\x1béafter\n",
+        );
+        let document = builder.finish();
+
+        assert_eq!(document.line_count(), 5);
+        assert_eq!(document.line_text(0), Some("[31"));
+        assert_eq!(document.line_text(1), Some("mvisiblegreen"));
+        assert_eq!(document.line_text(2), Some("private"));
+        assert_eq!(document.line_text(3), Some("beforeéafter"));
+
+        let mut output = Vec::new();
+        document.write_viewport(&mut output, 0, 5).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("[31"));
+        assert!(output.contains("mvisible"));
+        assert!(output.contains("\x1b[32mgreen"));
+        assert!(output.contains("beforeéafter"));
+        assert!(!output.contains("\x1b[31\nm"));
+        assert!(!output.contains("\x1b[?31m"));
     }
 }

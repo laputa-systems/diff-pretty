@@ -21,24 +21,61 @@ impl<R> ReaderSource<R> {
 
 impl<R: BufRead + Send + 'static> ChunkSource for ReaderSource<R> {
     fn produce(mut self, emit: &mut dyn FnMut(&str) -> io::Result<()>) -> io::Result<()> {
+        let mut carry = Vec::with_capacity(4);
+        let mut candidate = Vec::new();
         loop {
             let buffer = self.reader.fill_buf()?;
             if buffer.is_empty() {
-                return Ok(());
+                return if carry.is_empty() {
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        std::str::from_utf8(&carry).expect_err("carry contains incomplete UTF-8"),
+                    ))
+                };
             }
-            let mut take = buffer.len().min(self.chunk_size);
-            while take > 0 && std::str::from_utf8(&buffer[..take]).is_err() {
-                take -= 1;
+            let take = buffer.len().min(self.chunk_size);
+            if carry.is_empty() {
+                match std::str::from_utf8(&buffer[..take]) {
+                    Ok(chunk) => emit(chunk)?,
+                    Err(error) => {
+                        let valid_up_to = error.valid_up_to();
+                        if valid_up_to > 0 {
+                            let valid = std::str::from_utf8(&buffer[..valid_up_to])
+                                .expect("valid_up_to ends at a UTF-8 boundary");
+                            emit(valid)?;
+                        }
+                        if error.error_len().is_some() {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                        }
+                        carry.extend_from_slice(&buffer[valid_up_to..take]);
+                    }
+                }
+            } else {
+                candidate.clear();
+                candidate.extend_from_slice(&carry);
+                candidate.extend_from_slice(&buffer[..take]);
+                match std::str::from_utf8(&candidate) {
+                    Ok(chunk) => {
+                        emit(chunk)?;
+                        carry.clear();
+                    }
+                    Err(error) => {
+                        let valid_up_to = error.valid_up_to();
+                        if valid_up_to > 0 {
+                            let valid = std::str::from_utf8(&candidate[..valid_up_to])
+                                .expect("valid_up_to ends at a UTF-8 boundary");
+                            emit(valid)?;
+                        }
+                        if error.error_len().is_some() {
+                            return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+                        }
+                        carry.clear();
+                        carry.extend_from_slice(&candidate[valid_up_to..]);
+                    }
+                }
             }
-            if take == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "input is not valid UTF-8",
-                ));
-            }
-            let chunk = std::str::from_utf8(&buffer[..take])
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-            emit(chunk)?;
             self.reader.consume(take);
         }
     }
@@ -99,8 +136,9 @@ impl ChunkSource for FilesSource {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChunkSource, FileSource, FilesSource};
+    use super::{ChunkSource, FileSource, FilesSource, ReaderSource};
     use std::fs;
+    use std::io::{BufReader, Cursor};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temporary_path(name: &str) -> std::path::PathBuf {
@@ -134,5 +172,28 @@ mod tests {
         let path = temporary_path("missing");
         let error = FileSource::new(&path).produce(&mut |_| Ok(())).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn reader_preserves_utf8_scalars_split_at_one_byte_boundaries() {
+        let input = "aé𐍈z";
+        let reader = BufReader::with_capacity(1, Cursor::new(input.as_bytes()));
+        let mut output = String::new();
+        ReaderSource::new(reader)
+            .produce(&mut |chunk| {
+                output.push_str(chunk);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn reader_rejects_malformed_and_incomplete_utf8() {
+        for input in [&[0xff][..], &[0xe2, 0x82][..]] {
+            let reader = BufReader::with_capacity(1, Cursor::new(input));
+            let error = ReaderSource::new(reader).produce(&mut |_| Ok(())).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        }
     }
 }
