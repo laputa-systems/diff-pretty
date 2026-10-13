@@ -12,5 +12,5 @@ pub use render::{
     RenderSession, render, render_document, render_reader_document, render_reader_to, render_to,
 };
 
-/// Fixed terminal width used when stdout is not a terminal.
+/// Nominal renderer width in columns; hunk content is not constrained by it.
 pub const WIDTH: usize = 80;

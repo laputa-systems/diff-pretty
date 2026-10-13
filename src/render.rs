@@ -536,7 +536,7 @@ fn write_hunk_line(
 
 /// Write one context ("zero") hunk line: the two line-number cells (both gray)
 /// and the body. Tabs are expanded inline into the line Writer (each tab to 8
-/// spaces, `--tabs` default) instead of building an intermediate `Cow`, so the
+/// spaces) instead of building an intermediate `Cow`, so the
 /// context line never heap-allocates.
 fn write_zero_line(
     out: &mut impl RenderSink,
@@ -1112,11 +1112,10 @@ fn push_decor_label(out: &mut impl RenderSink, s: &str) {
     }
 }
 
-/// Tab expansion width (`--tabs` default 8 spaces).
+/// Replacement text for each tab, expanded to eight spaces.
 const TAB_STOP: &str = "        ";
 
-/// Replace each tab with a constant number of spaces (`--tabs` default 8),
-/// replacing each tab with eight spaces. This is not tab-stop alignment. Lines
+/// Replace each tab with eight spaces. This is not tab-stop alignment. Lines
 /// without a tab are returned borrowed, so the common case allocates nothing.
 fn expand_tabs(s: &str) -> Cow<'_, str> {
     if !s.as_bytes().contains(&b'\t') {
@@ -1148,10 +1147,9 @@ fn strip_sgr_append(s: &str, scratch: &mut String) {
     }
 }
 
-/// Emit the hunk-header box for `hunk-header-style = none` on a `@@` line that
-/// carries a code fragment: `┌─ ... ┐` / `• <fragment> │` / `└─ ... ┘`, with no
-/// line number. When the `@@` line has no fragment, no box is drawn (the caller
-/// has already emitted the blank line).
+/// Emit a blue box around a code fragment on a `@@` line, with no line number.
+/// When the line has no fragment, no box is drawn; the caller has already
+/// emitted the blank line.
 ///
 /// `w` is the reused line Writer: the content line is pushed through it (no
 /// per-box Writer) and the borders are pushed from the `─` constant (no

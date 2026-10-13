@@ -2,8 +2,8 @@
 //!
 //! The reusable part of scrl is terminal-independent. It accepts UTF-8 text
 //! with CSI SGR styling, searches visible text, and exposes a session that a
-//! caller may drive with its own terminal adapter. The command-line runner is
-//! intentionally stdin-only and never consults an external pager.
+//! caller may drive with its own terminal adapter. The command accepts stdin
+//! or file operands and never invokes an external pager.
 
 mod document;
 mod search;

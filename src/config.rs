@@ -15,9 +15,9 @@ pub mod sgr {
     pub const MINUS_NUM: &str = "\x1b[38;5;88m";
     /// Dark green: plus-line number (color index 28).
     pub const PLUS_NUM: &str = "\x1b[38;5;28m";
-    /// Red: minus content (`minus-style = red`).
+    /// Red: removed content.
     pub const MINUS: &str = "\x1b[31m";
-    /// Green: plus content (`plus-style = green`).
+    /// Green: added content.
     pub const PLUS: &str = "\x1b[32m";
     /// Emph (bold + reverse) for changed words; color is inherited from the
     /// surrounding minus/plus base, so only the added attributes are emitted.

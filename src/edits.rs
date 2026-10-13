@@ -1,11 +1,11 @@
 //! Word-diff edit inference. Given ordered minus and plus lines it produces,
 //! for each line, sections marking the changed tokens for emphasis.
 //!
-//! Word runs use the fixed `\w+`-style tokenization rule.
+//! Word runs contain Unicode alphanumeric characters and underscores.
 
 use crate::align::{Alignment, Cell, Operation};
 
-/// is a Unicode `\w` word char (approximation of regex `\w`, exact for ASCII).
+/// Whether `c` is an underscore or a Unicode alphanumeric character.
 fn is_word_char(c: char) -> bool {
     c == '_' || c.is_alphanumeric()
 }
@@ -16,7 +16,7 @@ fn is_word_char(c: char) -> bool {
 ///
 /// `tokens` starts as `[""]`; before the first word run an extra `""` is pushed
 /// when the run doesn't start at byte 0, each gap is pushed as one token per
-/// grapheme (char, for ASCII), then the word; the trailing gap (or the whole
+/// character, then the word; the trailing gap (or the whole
 /// line when there are no words) is appended the same way.
 pub(crate) fn tokenize_into<'a>(line: &'a str, tokens: &mut Vec<&'a str>) {
     tokens.clear();

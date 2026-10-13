@@ -1,29 +1,39 @@
 # diff-pretty
 
-A renderer and built-in pager for Git-style unified diffs. It reads patch text
-from stdin, restyles it with a fixed presentation (line-number gutters, word-level
-highlights, file and hunk decorations), and writes ANSI output to stdout. There is
-no configuration file.
+`diff-pretty` reads Git-style patches from stdin and renders colored line
+numbers, word changes, and file decorations. It can show long output in its
+built-in pager. It has no configuration file and never invokes an external
+pager.
+
+## Install
+
+Install the current repository version with Cargo (requires Rust):
+
+```sh
+cargo install --git https://github.com/laputa-systems/diff-pretty --package diff-pretty
+```
+
+The manual release workflow publishes prebuilt macOS and Linux binaries as
+pre-releases on the [GitHub releases](https://github.com/laputa-systems/diff-pretty/releases)
+page.
+
+## Use
 
 ```sh
 git show | diff-pretty
-diff-pretty --paging=never < fixtures/show_003.patch
+diff-pretty --paging=never < changes.patch
 ```
 
-Paging flags: `--paging=auto|always|never` and `--no-pager`. The default is
-`always`, which uses the built-in pager only when stdout is a terminal. The pager
-is also available as the standalone `scrl` binary (`make scrl`).
+Paging options are `--paging=auto`, `--paging=always`, and `--paging=never`;
+`--no-pager` is an alias for `never`. The default is `always`: an interactive
+terminal opens the built-in pager, while redirected output is written directly.
+`auto` opens the pager only when terminal output exceeds one screen.
 
-## Build
+The renderer uses an 80-column file underline. Hunk content is not wrapped or
+clipped, so long lines can exceed the terminal width; the pager clips them at
+the terminal edge. See [supported input](docs/input.md) for the patch formats
+and cases it handles.
 
-```sh
-make release   # static release build
-make install   # release build, then copy to ~/usr/bin
-make test
-```
+## Help and license
 
-See `AGENTS.md` for the output contract and repository layout.
-
-## License
-
-MIT
+Report issues at [GitHub Issues](https://github.com/laputa-systems/diff-pretty/issues). Licensed under [MIT](LICENSE).
