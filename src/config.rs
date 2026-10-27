@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 /// one reset.
 pub mod sgr {
     pub const RESET: &str = "\x1b[0m";
-    /// Blue: file decoration, hunk box, line-number cell borders.
+    /// Blue: file decoration and hunk box.
     pub const BLUE: &str = "\x1b[34m";
     /// Gray: context ("zero") line numbers -> rgb(68,68,68).
     pub const ZERO_NUM: &str = "\x1b[38;2;68;68;68m";
@@ -47,8 +47,6 @@ pub fn push_pad_number(out: &mut String, line_number: Option<usize>, width: usiz
     let left = pad / 2;
     let right = pad - left;
     if pad > 0 && width % 2 != n_width % 2 {
-        // Preserve the centered field when the width and digit count differ in
-        // parity by shifting the value one column to the right.
         out.push(' ');
         push_spaces(out, left);
         let _ = write!(out, "{n}");

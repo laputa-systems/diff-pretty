@@ -13,7 +13,7 @@ Install the current repository version with Cargo (requires Rust):
 cargo install --git https://github.com/laputa-systems/diff-pretty --package diff-pretty
 ```
 
-The manual release workflow publishes prebuilt macOS and Linux binaries as
+The manual release workflow publishes prebuilt Linux musl binaries as
 pre-releases on the [GitHub releases](https://github.com/laputa-systems/diff-pretty/releases)
 page.
 

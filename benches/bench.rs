@@ -24,10 +24,6 @@ use diff_pretty::{render, render_document, render_reader_document, render_reader
 #[global_allocator]
 static ALLOC: AllocProfiler = AllocProfiler::system();
 
-// ---------------------------------------------------------------------------
-// Real vendored fixtures (loaded once, leaked for the process lifetime)
-// ---------------------------------------------------------------------------
-
 /// Every `fixtures/*.patch`, sorted by name. Used directly by the corpus bench
 /// and as the source for individual named fixtures.
 fn corpus() -> &'static [(String, String)] {
@@ -57,9 +53,6 @@ fn fixture(name: &str) -> &'static str {
         .unwrap_or_else(|| panic!("fixture {name} not in corpus"))
 }
 
-// These are deliberately named rather than selected by a size threshold: the
-// benchmark corpus is a checked-in presentation contract, and a fixture moving
-// between buckets should be an intentional reviewable change.
 const SHOW_METADATA_FIXTURES: &[&str] = &[
     "show_001", "show_003", "show_006", "show_032", "show_038", "show_039", "show_040", "show_063",
     "show_078", "show_082", "show_095", "show_098",
@@ -85,10 +78,6 @@ fn render_typical_show_fixtures() -> usize {
         .map(|(_, input)| render(input).len())
         .sum()
 }
-
-// ---------------------------------------------------------------------------
-// End-to-end render: real fixtures
-// ---------------------------------------------------------------------------
 
 #[rustybench::bench]
 fn render_show_typical(b: Bencher) {

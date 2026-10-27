@@ -17,17 +17,20 @@ static TERMINATED: AtomicBool = AtomicBool::new(false);
 static SUSPEND_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(unix)]
+// SAFETY: `signal` and `raise` are the POSIX functions with these signatures.
 unsafe extern "C" {
     fn signal(signal: std::ffi::c_int, handler: usize) -> usize;
     fn raise(signal: std::ffi::c_int) -> std::ffi::c_int;
 }
 
 #[cfg(unix)]
+// SAFETY: the handler only stores an atomic. That is async-signal-safe.
 unsafe extern "C" fn handle_term(_signal: std::ffi::c_int) {
     TERMINATED.store(true, Ordering::Relaxed);
 }
 
 #[cfg(unix)]
+// SAFETY: the handler only stores an atomic. That is async-signal-safe.
 unsafe extern "C" fn handle_tstp(_signal: std::ffi::c_int) {
     SUSPEND_REQUESTED.store(true, Ordering::Relaxed);
 }
@@ -43,8 +46,7 @@ impl SignalGuard {
     pub(crate) fn install() -> Self {
         TERMINATED.store(false, Ordering::Relaxed);
         SUSPEND_REQUESTED.store(false, Ordering::Relaxed);
-        // SIGTERM is delivered asynchronously; the handler only flips an
-        // atomic. The owning loop observes it and performs normal cleanup.
+        // SAFETY: both handlers only store atomics. Drop restores these dispositions.
         let previous_term = unsafe { signal(15, handle_term as *const () as usize) };
         let previous_tstp = unsafe { signal(SIGTSTP, handle_tstp as *const () as usize) };
         Self {
@@ -57,6 +59,7 @@ impl SignalGuard {
 #[cfg(unix)]
 impl Drop for SignalGuard {
     fn drop(&mut self) {
+        // SAFETY: these are the dispositions `install` captured from `signal`.
         unsafe {
             signal(15, self.previous_term);
             signal(SIGTSTP, self.previous_tstp);
@@ -79,11 +82,13 @@ pub(crate) fn suspend<W: io::Write + ?Sized>(output: &mut W, raw: &RawMode<'_>) 
     output.write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")?;
     output.flush()?;
     raw.restore();
+    // SAFETY: `0` is `SIG_DFL`. `raise` delivers SIGTSTP after the terminal is restored.
     unsafe {
         signal(SIGTSTP, 0);
         raise(SIGTSTP);
     }
     raw.reenter()?;
+    // SAFETY: reinstalls the atomic-only handler after the default disposition ran.
     unsafe {
         signal(SIGTSTP, handle_tstp as *const () as usize);
     }

@@ -8,10 +8,9 @@ make test
 cargo check --workspace --all-targets
 ```
 
-`make test` runs workspace tests in release mode. `make test-ci` is the quiet release-mode test command used by the release workflow.
-
-The CI workflow runs `cargo check --workspace --all-targets` and
-`cargo test --workspace` on pushes and pull requests for Linux and macOS.
+`make test` runs workspace tests in release mode. The macOS release job runs
+the quiet form, `make test-ci`. CI runs `cargo check --workspace --all-targets`
+and `cargo test --workspace` on pushes and pull requests for Linux and macOS.
 
 ## Benchmarks
 
@@ -22,7 +21,8 @@ compare a candidate file, set `AFTER` to its path when running
 `make bench-diff`.
 
 The root suite covers rendering, alignment, allocation behavior, streaming,
-retained documents, and pager viewports. The `scrl` suite is in
+retained documents, and pager viewports. Its show-fixture bundles are the
+named lists in `benches/bench.rs`, not a size cutoff. The `scrl` suite is in
 `scrl/benches/bench.rs` and can be run with:
 
 ```sh

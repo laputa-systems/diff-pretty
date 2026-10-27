@@ -1,10 +1,10 @@
 //! Focused scrl pager benchmarks.
 //!
-//! These deliberately measure the work v1 is expected to change: complete
-//! viewport redraws, horizontal clipping, cached search highlighting, and a
-//! live document receiving a new chunk while search is active. Setup happens
-//! outside the steady-state redraw benchmarks. rustybench's allocator profiler
-//! reports time, allocation count, and allocated bytes for each operation.
+//! These measure complete viewport redraws, horizontal clipping, cached search
+//! highlighting, and a live document receiving a new chunk while search is
+//! active. Setup happens outside the steady-state redraw benchmarks.
+//! rustybench's allocator profiler reports time, allocation count, and
+//! allocated bytes for each operation.
 
 use rustybench::{AllocProfiler, Bencher, black_box};
 use scrl::{Document, DocumentBuilder, Event, Session, SessionOptions, Size};
