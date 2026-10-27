@@ -785,6 +785,132 @@ pub(crate) fn run_retained_terminal_with_tty(
 }
 
 #[cfg(all(feature = "terminal", unix))]
+enum LoadEvent {
+    Chunk(String),
+    Finished(io::Result<()>),
+}
+
+#[cfg(all(feature = "terminal", unix))]
+enum LoadStatus {
+    Reading,
+    Finished,
+    Quit,
+}
+
+#[cfg(all(feature = "terminal", unix))]
+fn begin_pager<'a>(
+    tty: &'a std::fs::File,
+    output: &mut dyn Write,
+    session: &mut Session,
+) -> io::Result<Option<(RawMode<'a>, KeyReader)>> {
+    let raw = match RawMode::enter(tty) {
+        Ok(raw) => raw,
+        Err(_) => return Ok(None),
+    };
+    let key_tty = tty.try_clone()?;
+    let key_reader = KeyReader::spawn(key_tty);
+    if let Err(error) = output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H]") {
+        return Err(error);
+    }
+    if let Err(error) = session.draw(output) {
+        let _ = output.write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l");
+        let _ = output.flush();
+        return Err(error);
+    }
+    Ok(Some((raw, key_reader)))
+}
+
+#[cfg(all(feature = "terminal", unix))]
+fn take_load(session: &mut Session, event: LoadEvent) -> io::Result<LoadStatus> {
+    match event {
+        LoadEvent::Chunk(chunk) => {
+            session.push_chunk(&chunk);
+            Ok(LoadStatus::Reading)
+        }
+        LoadEvent::Finished(result) => {
+            result?;
+            session.finish();
+            Ok(LoadStatus::Finished)
+        }
+    }
+}
+
+#[cfg(all(feature = "terminal", unix))]
+fn wait_for_source(
+    receiver: &mpsc::Receiver<LoadEvent>,
+    session: &mut Session,
+    output: &mut dyn Write,
+    raw: &RawMode<'_>,
+    key_reader: &KeyReader,
+) -> io::Result<LoadStatus> {
+    loop {
+        if terminated() {
+            return Ok(LoadStatus::Quit);
+        }
+        if suspend_requested() {
+            suspend(output, raw)?;
+            session.draw(output)?;
+        }
+        match receiver.try_recv() {
+            Ok(event) => return take_load(session, event),
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "source stopped before EOF",
+                ));
+            }
+        }
+        match key_reader.recv_timeout(Duration::from_millis(15)) {
+            Ok(event) => match session.handle(event) {
+                Action::Quit => return Ok(LoadStatus::Quit),
+                Action::Continue { changed: true } => session.draw(output)?,
+                Action::Continue { changed: false } => {}
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "pager key reader stopped",
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "terminal", unix))]
+fn write_unpaged(
+    output: &mut dyn Write,
+    session: &Session,
+    receiver: &mpsc::Receiver<LoadEvent>,
+    finished: bool,
+) -> io::Result<()> {
+    session.document().write_to(output)?;
+    if finished {
+        output.flush()?;
+        return Ok(());
+    }
+    loop {
+        match receiver.recv() {
+            Ok(event) => match event {
+                LoadEvent::Chunk(chunk) => output.write_all(chunk.as_bytes())?,
+                LoadEvent::Finished(result) => {
+                    result?;
+                    output.flush()?;
+                    return Ok(());
+                }
+            },
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "source stopped before EOF",
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "terminal", unix))]
 fn run_terminal_live<S: ChunkSource>(
     source: S,
     options: RunOptions,
@@ -821,23 +947,29 @@ fn run_terminal_live<S: ChunkSource>(
             rows: 24,
             columns: 80,
         });
+    let follow = options.session.follow;
     let mut session = Session::new(size, options.session)?;
-    #[cfg(unix)]
-    let raw = match RawMode::enter(&tty) {
-        Ok(raw) => raw,
-        Err(_) => {
-            let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
-            source.produce(&mut emit)?;
-            output.flush()?;
-            return Ok(ExitReason::EndOfInput);
+    let mut raw: Option<RawMode<'_>> = None;
+    let mut key_reader: Option<KeyReader> = None;
+    let mut _signals: Option<SignalGuard> = None;
+    let mut pager_started = false;
+    if follow {
+        match begin_pager(&tty, output, &mut session)? {
+            Some((mode, keys)) => {
+                raw = Some(mode);
+                key_reader = Some(keys);
+                _signals = Some(SignalGuard::install());
+                pager_started = true;
+            }
+            None => {
+                let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
+                source.produce(&mut emit)?;
+                output.flush()?;
+                return Ok(ExitReason::EndOfInput);
+            }
         }
-    };
-    let _signals = SignalGuard::install();
-
-    enum LoadEvent {
-        Chunk(String),
-        Finished(io::Result<()>),
     }
+
     let cancelled = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = mpsc::sync_channel(1);
     let worker_cancelled = Arc::clone(&cancelled);
@@ -853,82 +985,95 @@ fn run_terminal_live<S: ChunkSource>(
         let _ = sender.send(LoadEvent::Finished(result));
     });
 
-    let key_tty = tty.try_clone()?;
-    let mut key_reader = KeyReader::spawn(key_tty);
-
-    let auto = matches!(options.paging, crate::PagingMode::Auto) && !session.follow;
-    let mut pager_started = !auto;
-    let mut last_draw = None;
-    if pager_started {
-        output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H")?;
-    }
-    let mut result = if pager_started {
-        let result = session.draw(output);
-        last_draw = Some(Instant::now());
-        result
-    } else {
-        Ok(())
-    };
+    let mut result = Ok(());
     let mut finished = false;
     let mut quit = false;
-    let mut content_drawn = false;
-    let receive = |session: &mut Session| -> io::Result<bool> {
-        match receiver.recv() {
-            Ok(LoadEvent::Chunk(chunk)) => {
-                session.push_chunk(&chunk);
-                Ok(false)
-            }
-            Ok(LoadEvent::Finished(source_result)) => {
-                source_result?;
-                session.finish();
-                Ok(true)
-            }
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "source stopped before EOF",
-            )),
-        }
-    };
+    let mut plain = false;
+    let mut last_draw = pager_started.then(Instant::now);
 
-    // Pull only enough source data to make the first viewport useful. Once
-    // this loop ends, the producer is blocked on the one-slot channel until a
-    // navigation or search action asks for more data.
-    while result.is_ok()
-        && !finished
-        && (session.follow || !pager_started || session.document().line_count() <= size.rows)
-    {
-        match receive(&mut session) {
-            Ok(done) => finished = done,
-            Err(error) => {
-                result = Err(error);
-                break;
+    if follow {
+        while result.is_ok() && !finished && !quit {
+            let status = {
+                let raw = raw.as_ref().expect("pager holds raw mode");
+                let key_reader = key_reader.as_ref().expect("pager reads keys");
+                wait_for_source(&receiver, &mut session, output, raw, key_reader)
+            };
+            match status {
+                Ok(LoadStatus::Quit) => quit = true,
+                Ok(LoadStatus::Finished) => finished = true,
+                Ok(LoadStatus::Reading) => {
+                    if last_draw.is_none_or(|last| last.elapsed() >= Duration::from_millis(16)) {
+                        result = session.draw(output);
+                        if result.is_ok() {
+                            last_draw = Some(Instant::now());
+                        }
+                    }
+                }
+                Err(error) => result = Err(error),
             }
         }
-        if result.is_ok() && pager_started && !content_drawn && session.document().line_count() > 0
-        {
-            result = session.draw(output);
-            content_drawn = result.is_ok();
-            last_draw = Some(Instant::now());
-        }
-        if !pager_started && session.document().line_count() > size.rows {
-            pager_started = true;
-            output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H")?;
-        }
-        if session.follow
-            && pager_started
-            && last_draw.is_none_or(|last| last.elapsed() >= Duration::from_millis(16))
-        {
-            result = session.draw(output);
-            last_draw = Some(Instant::now());
+    } else {
+        while result.is_ok() && !finished && !pager_started && !plain {
+            match receiver.recv() {
+                Ok(LoadEvent::Chunk(chunk)) => {
+                    session.push_chunk(&chunk);
+                    if session.document().line_count() > size.rows {
+                        match begin_pager(&tty, output, &mut session) {
+                            Ok(Some((mode, keys))) => {
+                                raw = Some(mode);
+                                key_reader = Some(keys);
+                                _signals = Some(SignalGuard::install());
+                                pager_started = true;
+                            }
+                            Ok(None) => {
+                                result = write_unpaged(output, &session, &receiver, false);
+                                plain = true;
+                            }
+                            Err(error) => result = Err(error),
+                        }
+                    }
+                }
+                Ok(LoadEvent::Finished(source_result)) => {
+                    result = source_result;
+                    if result.is_ok() {
+                        session.finish();
+                        finished = true;
+                    }
+                }
+                Err(_) => {
+                    result = Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "source stopped before EOF",
+                    ));
+                }
+            }
         }
     }
 
-    if result.is_ok() && pager_started {
+    if result.is_ok() && !quit && pager_started {
         result = session.draw(output);
-        last_draw = Some(Instant::now());
-    } else if result.is_ok() && !pager_started {
-        session.document().write_to(output)?;
-        output.flush()?;
+        if result.is_ok() {
+            last_draw = Some(Instant::now());
+        }
+    } else if result.is_ok() && !quit && !pager_started && !plain {
+        let fits = session.document().line_count() <= size.rows;
+        if matches!(options.paging, crate::PagingMode::Auto) && fits {
+            session.document().write_to(output)?;
+            output.flush()?;
+        } else {
+            match begin_pager(&tty, output, &mut session) {
+                Ok(Some((mode, keys))) => {
+                    raw = Some(mode);
+                    key_reader = Some(keys);
+                    _signals = Some(SignalGuard::install());
+                    pager_started = true;
+                }
+                Ok(None) => {
+                    result = write_unpaged(output, &session, &receiver, true);
+                }
+                Err(error) => result = Err(error),
+            }
+        }
     }
 
     while pager_started && result.is_ok() && !quit {
@@ -938,40 +1083,41 @@ fn run_terminal_live<S: ChunkSource>(
             break;
         }
         if suspend_requested() {
-            suspend(output, &raw)?;
+            let raw = raw.as_ref().expect("pager holds raw mode");
+            suspend(output, raw)?;
             result = session.draw(output);
             last_draw = Some(Instant::now());
             continue;
         }
         if session.follow && !finished {
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(LoadEvent::Chunk(chunk)) => {
-                    session.push_chunk(&chunk);
+            let status = {
+                let raw = raw.as_ref().expect("pager holds raw mode");
+                let key_reader = key_reader.as_ref().expect("pager reads keys");
+                wait_for_source(&receiver, &mut session, output, raw, key_reader)
+            };
+            match status {
+                Ok(LoadStatus::Quit) => quit = true,
+                Ok(LoadStatus::Finished) => {
+                    finished = true;
+                    result = session.draw(output);
+                    if result.is_ok() {
+                        last_draw = Some(Instant::now());
+                    }
+                }
+                Ok(LoadStatus::Reading) => {
                     if last_draw.is_none_or(|last| last.elapsed() >= Duration::from_millis(16)) {
                         result = session.draw(output);
-                        last_draw = Some(Instant::now());
+                        if result.is_ok() {
+                            last_draw = Some(Instant::now());
+                        }
                     }
                 }
-                Ok(LoadEvent::Finished(source_result)) => {
-                    result = source_result;
-                    if result.is_ok() {
-                        session.finish();
-                        result = session.draw(output);
-                        last_draw = Some(Instant::now());
-                    }
-                    finished = true;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    result = Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "source stopped before EOF",
-                    ));
-                }
+                Err(error) => result = Err(error),
             }
             continue;
         }
 
+        let key_reader = key_reader.as_ref().expect("pager reads keys");
         match key_reader.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
                 let pull = source_pull_request(&session, finished, event);
@@ -996,10 +1142,19 @@ fn run_terminal_live<S: ChunkSource>(
                                 }
                             }
                         }
-                        match receive(&mut session) {
-                            Ok(done) => {
+                        let status = {
+                            let raw = raw.as_ref().expect("pager holds raw mode");
+                            wait_for_source(&receiver, &mut session, output, raw, key_reader)
+                        };
+                        match status {
+                            Ok(LoadStatus::Reading) => loaded = true,
+                            Ok(LoadStatus::Finished) => {
                                 loaded = true;
-                                finished = done;
+                                finished = true;
+                            }
+                            Ok(LoadStatus::Quit) => {
+                                quit = true;
+                                break;
                             }
                             Err(error) => {
                                 result = Err(error);
@@ -1009,10 +1164,19 @@ fn run_terminal_live<S: ChunkSource>(
                     }
                 } else if !matches!(pull, SourcePull::None) {
                     loop {
-                        match receive(&mut session) {
-                            Ok(done) => {
+                        let status = {
+                            let raw = raw.as_ref().expect("pager holds raw mode");
+                            wait_for_source(&receiver, &mut session, output, raw, key_reader)
+                        };
+                        match status {
+                            Ok(LoadStatus::Reading) => loaded = true,
+                            Ok(LoadStatus::Finished) => {
                                 loaded = true;
-                                finished = done;
+                                finished = true;
+                            }
+                            Ok(LoadStatus::Quit) => {
+                                quit = true;
+                                break;
                             }
                             Err(error) => {
                                 result = Err(error);
@@ -1047,7 +1211,11 @@ fn run_terminal_live<S: ChunkSource>(
         }
     }
     cancelled.store(true, Ordering::Relaxed);
-    let key_cleanup = key_reader.stop();
+    let key_cleanup = if let Some(keys) = key_reader.as_mut() {
+        keys.stop()
+    } else {
+        Ok(())
+    };
     let cleanup = if pager_started {
         output
             .write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")
@@ -1055,7 +1223,6 @@ fn run_terminal_live<S: ChunkSource>(
     } else {
         Ok(())
     };
-    #[cfg(unix)]
     drop(raw);
     result.and(key_cleanup).and(cleanup).map(|()| {
         if quit {
