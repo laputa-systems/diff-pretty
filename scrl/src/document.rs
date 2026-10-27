@@ -63,6 +63,38 @@ impl Document {
         builder.finish()
     }
 
+    pub(crate) fn pop_last_line(&mut self) {
+        if let Some(&(raw_start, _)) = self.raw_lines.last() {
+            let visible_start = self.visible_lines.last().map_or(0, |&(start, _)| start);
+            self.raw_lines.pop();
+            self.visible_lines.pop();
+            self.raw.truncate(raw_start);
+            self.visible.truncate(visible_start);
+        }
+    }
+
+    pub(crate) fn append_matching_lines(
+        &mut self,
+        source: &Document,
+        from_line: usize,
+        pattern: &Regex,
+    ) {
+        let mut tail = String::new();
+        for line in from_line..source.line_count() {
+            if !pattern.is_match(source.line_text(line).unwrap_or_default()) {
+                continue;
+            }
+            let (start, end) = source.raw_lines[line];
+            tail.push_str(&source.raw[start..end]);
+            if source.raw.as_bytes().get(end) == Some(&b'\n') {
+                tail.push('\n');
+            }
+        }
+        if !tail.is_empty() {
+            self.append(&tail);
+        }
+    }
+
     fn reindex_from(&mut self, mut raw_start: usize, mut visible_start: usize) {
         let bytes = self.raw.as_bytes();
         let mut index = raw_start;

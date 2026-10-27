@@ -220,20 +220,43 @@ impl Session {
         if !self.finished {
             let last_line = self.document.line_count().checked_sub(1);
             if self.filter.is_some() {
+                let previous_lines = self
+                    .source_document
+                    .as_ref()
+                    .expect("filtered sessions retain their source document")
+                    .line_count();
+                let stale_tail = previous_lines > 0 && {
+                    let pattern = self
+                        .filter
+                        .as_ref()
+                        .expect("filtered sessions retain their filter");
+                    self.source_document
+                        .as_ref()
+                        .expect("filtered sessions retain their source document")
+                        .line_text(previous_lines - 1)
+                        .is_some_and(|text| pattern.is_match(text))
+                };
                 self.source_document
                     .as_mut()
                     .expect("filtered sessions retain their source document")
                     .append_for_session(chunk);
+                if stale_tail {
+                    self.document.pop_last_line();
+                }
                 let selected = self.selected_search_match();
                 let pattern = self
                     .filter
                     .as_ref()
                     .expect("filtered sessions retain their filter");
-                self.document = self
+                let source = self
                     .source_document
                     .as_ref()
-                    .expect("filtered sessions retain their source document")
-                    .filtered(pattern);
+                    .expect("filtered sessions retain their source document");
+                self.document.append_matching_lines(
+                    source,
+                    previous_lines.saturating_sub(1),
+                    pattern,
+                );
                 self.rebuild_search_after_filter_change(selected);
             } else {
                 self.document.append_for_session(chunk);
@@ -1618,6 +1641,98 @@ mod tests {
         assert_eq!(pager.document.line_text(0), Some("keep first"));
         assert_eq!(pager.document.line_text(1), Some("keep second"));
         assert_eq!(pager.document.line_text(2), Some(""));
+    }
+
+    #[test]
+    fn filter_appends_only_new_matches_across_partial_chunks() {
+        let mut pager = Session::new(
+            Size {
+                rows: 4,
+                columns: 40,
+            },
+            SessionOptions {
+                title: "test".into(),
+                search_history: Vec::new(),
+                wrap: false,
+                follow: false,
+                filter: Some("keep".into()),
+            },
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
+        pager.push_chunk("drop one\nke");
+        assert_eq!(pager.document.line_count(), 0);
+        pager.push_chunk("ep first\nkeep second\ndrop two\n");
+        assert_eq!(pager.document.line_count(), 3);
+        assert_eq!(pager.document.line_text(0), Some("keep first"));
+        assert_eq!(pager.document.line_text(1), Some("keep second"));
+        assert_eq!(pager.document.line_text(2), Some(""));
+    }
+
+    #[test]
+    fn filter_discards_a_partial_match_completed_into_a_non_match() {
+        let mut pager = Session::new(
+            Size {
+                rows: 4,
+                columns: 40,
+            },
+            SessionOptions {
+                title: "test".into(),
+                search_history: Vec::new(),
+                wrap: false,
+                follow: false,
+                filter: Some("^keep$".into()),
+            },
+        )
+        .unwrap_or_else(|error| panic!("valid test options: {error}"));
+        pager.push_chunk("keep");
+        assert_eq!(pager.document.line_count(), 1);
+        assert_eq!(pager.document.line_text(0), Some("keep"));
+        pager.push_chunk("s\n");
+        assert_eq!(pager.document.line_count(), 0);
+    }
+
+    #[test]
+    fn filter_matches_single_push_after_many_chunks() {
+        let options = SessionOptions {
+            title: "test".into(),
+            search_history: Vec::new(),
+            wrap: false,
+            follow: false,
+            filter: Some("keep".into()),
+        };
+        let size = Size {
+            rows: 4,
+            columns: 40,
+        };
+        let mut input = String::new();
+        for line in 0..200 {
+            input.push_str(&format!(
+                "line {line} {}\n",
+                if line % 3 == 0 { "keep" } else { "drop" }
+            ));
+        }
+        let mut whole = Session::new(size, options.clone())
+            .unwrap_or_else(|error| panic!("valid test options: {error}"));
+        whole.push_chunk(&input);
+        let mut sliced = Session::new(size, options.clone())
+            .unwrap_or_else(|error| panic!("valid test options: {error}"));
+        let mut index = 0;
+        while index < input.len() {
+            let end = (index + 13).min(input.len());
+            sliced.push_chunk(&input[index..end]);
+            index = end;
+        }
+        assert_eq!(
+            sliced.document.line_count(),
+            whole.document.line_count()
+        );
+        for line in 0..whole.document.line_count() {
+            assert_eq!(
+                sliced.document.line_text(line),
+                whole.document.line_text(line),
+                "display diverges at line {line}"
+            );
+        }
     }
 
     #[test]
