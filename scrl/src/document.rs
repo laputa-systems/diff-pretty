@@ -161,6 +161,7 @@ impl Document {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn write_viewport_search<W: Write + ?Sized>(
         &self,
         output: &mut W,
@@ -250,7 +251,7 @@ impl Document {
         while index < end {
             if let Some((end, is_sgr)) = control_end(self.raw.as_bytes(), index) {
                 if is_sgr {
-                    output.write_all(self.raw[index..end].as_bytes())?;
+                    output.write_all(&self.raw.as_bytes()[index..end])?;
                 }
                 index = end;
             } else {
@@ -297,7 +298,7 @@ impl Document {
                     overlay = false;
                 }
                 if is_sgr {
-                    output.write_all(self.raw[index..end].as_bytes())?;
+                    output.write_all(&self.raw.as_bytes()[index..end])?;
                     style.apply(&self.raw[index..end]);
                 }
                 if is_sgr

@@ -249,9 +249,7 @@ impl KeyDecoder {
             return Some(Event::Escape);
         }
         let final_index = (2..self.len).find(|&index| (0x40..=0x7e).contains(&self.bytes[index]));
-        let Some(final_index) = final_index else {
-            return None;
-        };
+        let final_index = final_index?;
         let sequence = &self.bytes[2..final_index];
         let event = match self.bytes[final_index] {
             b'A' if sequence.is_empty() => Event::Up,

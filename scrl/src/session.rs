@@ -101,14 +101,11 @@ impl KeyReader {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let (sender, receiver) = mpsc::sync_channel(8);
-        let worker = thread::spawn(move || loop {
-            match read_event_tty_cancellable(&mut input, &worker_cancelled) {
-                Ok(Some(event)) => {
-                    if sender.send(event).is_err() {
-                        break;
-                    }
+        let worker = thread::spawn(move || {
+            while let Ok(Some(event)) = read_event_tty_cancellable(&mut input, &worker_cancelled) {
+                if sender.send(event).is_err() {
+                    break;
                 }
-                Ok(None) | Err(_) => break,
             }
         });
         Self {
@@ -848,9 +845,7 @@ fn begin_pager<'a>(
     };
     let key_tty = tty.try_clone()?;
     let key_reader = KeyReader::spawn(key_tty);
-    if let Err(error) = output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H]") {
-        return Err(error);
-    }
+    output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H]")?;
     if let Err(error) = session.draw(output) {
         let _ = output.write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l");
         let _ = output.flush();

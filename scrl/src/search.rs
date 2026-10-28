@@ -28,7 +28,7 @@ pub(crate) struct SearchSession {
 
 #[derive(Clone, Debug)]
 enum Matcher {
-    Literal(LiteralMatcher),
+    Literal(Box<LiteralMatcher>),
     Regex(Regex),
 }
 
@@ -136,7 +136,7 @@ impl SearchState {
             return;
         }
         let matcher = if is_literal(&query) {
-            Matcher::Literal(LiteralMatcher::new(&query))
+            Matcher::Literal(Box::new(LiteralMatcher::new(&query)))
         } else {
             match Regex::new(&query) {
                 Ok(regex) => Matcher::Regex(regex),
@@ -179,31 +179,31 @@ impl SearchState {
     }
 
     pub(crate) fn backspace(&mut self) {
-        if let Some(input) = self.input.as_mut() {
-            if input.cursor > 0 {
-                let start = input.text[..input.cursor]
-                    .char_indices()
-                    .next_back()
-                    .map(|(index, _)| index)
-                    .unwrap_or(0);
-                input.text.drain(start..input.cursor);
-                input.cursor = start;
-                self.error = None;
-            }
+        if let Some(input) = self.input.as_mut()
+            && input.cursor > 0
+        {
+            let start = input.text[..input.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(index, _)| index)
+                .unwrap_or(0);
+            input.text.drain(start..input.cursor);
+            input.cursor = start;
+            self.error = None;
         }
     }
 
     pub(crate) fn delete(&mut self) {
-        if let Some(input) = self.input.as_mut() {
-            if input.cursor < input.text.len() {
-                let end = input.text[input.cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(index, _)| input.cursor + index)
-                    .unwrap_or(input.text.len());
-                input.text.drain(input.cursor..end);
-                self.error = None;
-            }
+        if let Some(input) = self.input.as_mut()
+            && input.cursor < input.text.len()
+        {
+            let end = input.text[input.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(index, _)| input.cursor + index)
+                .unwrap_or(input.text.len());
+            input.text.drain(input.cursor..end);
+            self.error = None;
         }
     }
 
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn literal_and_regex_matchers_agree_for_plain_queries() {
         let text = "render render_document render";
-        let literal = Matcher::Literal(LiteralMatcher::new("render"));
+        let literal = Matcher::Literal(Box::new(LiteralMatcher::new("render")));
         let regex = Matcher::Regex(regex_lite::Regex::new("render").unwrap());
         assert_eq!(literal.ranges(text), regex.ranges(text));
     }
