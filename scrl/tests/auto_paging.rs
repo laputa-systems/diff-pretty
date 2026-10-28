@@ -69,6 +69,12 @@ fn short_auto_output_keeps_post_processing() {
                 Ok(0) => break output,
                 Ok(count) => output.extend_from_slice(&buffer[..count]),
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                // Linux reports EIO instead of EOF once the slave side closes.
+                Err(error)
+                    if error.raw_os_error() == Some(rustix::io::Errno::IO.raw_os_error()) =>
+                {
+                    break output;
+                }
                 Err(error) => panic!("read pty: {error}"),
             }
         }
