@@ -16,7 +16,7 @@ use crate::search::{SearchInput, SearchState};
 const RESET: &str = "\x1b[0m";
 #[cfg(all(feature = "terminal", unix))]
 use crate::terminal::{
-    RawMode, SignalGuard, read_event_tty, read_event_tty_cancellable, suspend,
+    RawMode, SignalGuard, reraise_term, read_event_tty, read_event_tty_cancellable, suspend,
     suspend_requested, terminated,
 };
 #[cfg(feature = "terminal")]
@@ -663,7 +663,7 @@ pub(crate) fn run_terminal<S: ChunkSource>(
             return Ok(ExitReason::EndOfInput);
         }
     };
-    let _signals = SignalGuard::install();
+    let _signals = SignalGuard::install()?;
     output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H")?;
     let mut result = session.draw(output);
     if result.is_ok() {
@@ -696,6 +696,14 @@ pub(crate) fn run_terminal<S: ChunkSource>(
         .and_then(|()| output.flush());
     #[cfg(unix)]
     drop(raw);
+    drop(_signals);
+    if terminated() {
+        reraise_term();
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "pager terminated by SIGTERM",
+        ));
+    }
     result.and(cleanup).map(|()| ExitReason::EndOfInput)
 }
 
@@ -763,7 +771,7 @@ pub(crate) fn run_retained_terminal_with_tty(
         }
     };
     let mut session = Session::from_document(document, size, options.session)?;
-    let _signals = SignalGuard::install();
+    let _signals = SignalGuard::install()?;
     let key_tty = tty
         .try_clone()
         .map_err(|error| io::Error::new(error.kind(), format!("clone pager tty: {error}")))?;
@@ -801,6 +809,14 @@ pub(crate) fn run_retained_terminal_with_tty(
         .map_err(|error| io::Error::new(error.kind(), format!("cleanup pager output: {error}")));
     let key_cleanup = key_reader.stop();
     drop(raw);
+    drop(_signals);
+    if terminated() {
+        reraise_term();
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "pager terminated by SIGTERM",
+        ));
+    }
     result
         .and(key_cleanup)
         .and(cleanup)
@@ -934,6 +950,18 @@ fn write_unpaged(
 }
 
 #[cfg(all(feature = "terminal", unix))]
+fn install_pager_signals(output: &mut dyn Write) -> io::Result<SignalGuard> {
+    match SignalGuard::install() {
+        Ok(guard) => Ok(guard),
+        Err(error) => {
+            let _ = output.write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l");
+            let _ = output.flush();
+            Err(error)
+        }
+    }
+}
+
+#[cfg(all(feature = "terminal", unix))]
 fn run_terminal_live<S: ChunkSource>(
     source: S,
     options: RunOptions,
@@ -981,7 +1009,7 @@ fn run_terminal_live<S: ChunkSource>(
             Some((mode, keys)) => {
                 raw = Some(mode);
                 key_reader = Some(keys);
-                _signals = Some(SignalGuard::install());
+                _signals = Some(install_pager_signals(output)?);
                 pager_started = true;
             }
             None => {
@@ -1045,7 +1073,7 @@ fn run_terminal_live<S: ChunkSource>(
                             Ok(Some((mode, keys))) => {
                                 raw = Some(mode);
                                 key_reader = Some(keys);
-                                _signals = Some(SignalGuard::install());
+                                _signals = Some(install_pager_signals(output)?);
                                 pager_started = true;
                             }
                             Ok(None) => {
@@ -1088,7 +1116,7 @@ fn run_terminal_live<S: ChunkSource>(
                 Ok(Some((mode, keys))) => {
                     raw = Some(mode);
                     key_reader = Some(keys);
-                    _signals = Some(SignalGuard::install());
+                    _signals = Some(install_pager_signals(output)?);
                     pager_started = true;
                 }
                 Ok(None) => {
@@ -1247,6 +1275,14 @@ fn run_terminal_live<S: ChunkSource>(
         Ok(())
     };
     drop(raw);
+    drop(_signals);
+    if terminated() {
+        reraise_term();
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "pager terminated by SIGTERM",
+        ));
+    }
     result.and(key_cleanup).and(cleanup).map(|()| {
         if quit {
             ExitReason::Quit

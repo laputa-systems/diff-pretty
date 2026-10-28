@@ -43,16 +43,43 @@ pub(crate) struct SignalGuard {
 
 #[cfg(unix)]
 impl SignalGuard {
-    pub(crate) fn install() -> Self {
+    pub(crate) fn install() -> io::Result<Self> {
         TERMINATED.store(false, Ordering::Relaxed);
         SUSPEND_REQUESTED.store(false, Ordering::Relaxed);
         // SAFETY: both handlers only store atomics. Drop restores these dispositions.
         let previous_term = unsafe { signal(15, handle_term as *const () as usize) };
+        // SAFETY: `usize::MAX` is `SIG_ERR`; no installed disposition compares equal.
+        if previous_term == usize::MAX {
+            return Err(io::Error::last_os_error());
+        }
         let previous_tstp = unsafe { signal(SIGTSTP, handle_tstp as *const () as usize) };
-        Self {
+        if previous_tstp == usize::MAX {
+            let error = io::Error::last_os_error();
+            // SAFETY: restores the disposition captured above.
+            unsafe {
+                signal(15, previous_term);
+            }
+            return Err(error);
+        }
+        Ok(Self {
             previous_term,
             previous_tstp,
-        }
+        })
+    }
+}
+
+/// Restore the default SIGTERM disposition and deliver SIGTERM to this
+/// process. Call only after the terminal is restored: raw mode is off and
+/// the alternate screen is gone, so dying here leaves nothing behind. When
+/// the signal is blocked and `raise` returns, the caller still reports an
+/// error instead of exiting zero.
+#[cfg(unix)]
+pub(crate) fn reraise_term() {
+    // SAFETY: `0` is `SIG_DFL`. The terminal is already restored, so the
+    // default disposition cannot strand raw mode or the alternate screen.
+    unsafe {
+        signal(15, 0);
+        raise(15);
     }
 }
 
