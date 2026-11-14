@@ -21,7 +21,7 @@ jobs:
       matrix:
         os:
           - ubuntu-26.04-arm
-          - macos-latest
+          - xcode-27
     defaults:
       run:
         shell: "bash -euo pipefail {0}"
