@@ -10,7 +10,7 @@ cargo check --workspace --all-targets
 
 `make test` runs workspace tests in release mode. The macOS release job runs
 the quiet form, `make test-ci`. CI runs `cargo check --workspace --all-targets`
-and `cargo test --workspace` on pushes and pull requests for Linux and macOS.
+and `make test` on pushes and pull requests for Linux and macOS.
 
 ## Benchmarks
 
