@@ -7,18 +7,24 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 Ground base: `e081d90fb98020ba64b307da178ccf3068e7e73e`. Rust code: 6.0k lines (fleet/loc/v1, vendored included, seeded). On macOS with a fresh scratch target, guarded `make test` took 15.41s cold and 1.40s warm; guarded `make lint` took 3.45s. All passed. PR CI now calls `make test`; platform-specific terminal tests run on their matching OS, and no missing-tool skip was found. No vendored trees found. The existing large-diff rendering benchmark is the declared perf workload; later scorecard measurements are pending.
 
+Types: escape-hatch lines 139 → 133. Candidate findings are deduplicated source locations; test and benchmark findings are excluded for unwrap/expect. Real means defect or deletable escape hatch; FP includes intentional code or findings outside typing scope.
+
+| Setting | Findings | Real | FP | Decision |
+| --- | ---: | ---: | ---: | --- |
+| unsafe_code forbid | 11 | 0 | 11 | reject: terminal FFI and PTY test |
+| wildcard_enum_match_arm | 3 | 0 | 3 | reject: intentional event fallbacks |
+| match_wildcard_for_single_variants | 0 | 0 | 0 | reject: no witness |
+| cast_possible_truncation | 0 | 0 | 0 | reject: no witness |
+| cast_sign_loss | 0 | 0 | 0 | reject: no witness |
+| unwrap_used | 4 | 0 | 4 | reject: bounded UTF-8 and nonempty array |
+| expect_used | 22 | 6 | 16 | reject: invariant checks exceed FP threshold |
+| redundant_clone | 2 | 0 | 2 | reject: not a typing defect |
+| needless_pass_by_value | 0 | 0 | 0 | reject: no witness |
+
 ## Tickets
 
 
 
-### DSLP-3 · P2 · Types: strict profile and typing findings
-
-- **Area:** deslop · types
-- **Where:** type checker and lint configuration; Rust sources
-- **Problem:** The strict-profile candidates in the deslop skill's tools reference have not been measured here.
-- **Recommendation:** Run the deslop Types step. Accept: clean at the adopted profile, escape hatches not increased, witnesses recorded.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
 
@@ -49,14 +55,6 @@ Ground base: `e081d90fb98020ba64b307da178ccf3068e7e73e`. Rust code: 6.0k lines (
 - **Effort:** M
 
 
-### DSLP-7 · P3 · Represent filtered session state together
-
-- **Area:** pager · types
-- **Where:** scrl/src/session.rs:73; scrl/src/session.rs:158; scrl/src/session.rs:216
-- **Problem:** Typing finding: filter and source_document are independent Options although filtered sessions require both. Session::push_chunk relies on repeated expect calls for this private invariant; constructors currently establish it, so a reachable failure is unproven. A future internal change can construct a filtered session without its source document and compile successfully.
-- **Recommendation:** Evaluate a single filtered-state variant containing both the regex and source document, preserving the public API and behavior. Use the currently accepted mismatched internal construction as a negative type witness and remove the corresponding expects if the model remains simpler.
-- **Fix with:** typing-audit
-- **Effort:** S
 
 
 ### DSLP-8 · P3 · Investigate unreachable legacy terminal runner branch
