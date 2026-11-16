@@ -162,8 +162,7 @@ mod tests {
                 },
             },
         )
-        .err()
-        .expect("invalid filter must fail before direct output");
+        .expect_err("invalid filter must fail before direct output");
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(error.get_ref().is_some());
     }
