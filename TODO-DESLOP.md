@@ -18,7 +18,9 @@ The current component selection needs narrowing before another bounded run.
 The owner resumed on 2026-11-16. The branch now contains current main and the
 full-help contract. Eleven current CLI cases, the full workspace suite and
 workspace clippy pass. Six hand faults fail their intended assertions and are
-restored. The next Scenario inventories 24 CLI mutants; it has not run yet.
+restored. The complete 24-mutant CLI Scenario found one missed paging binding;
+a literal parser-contract table catches it. The fresh result is 22 caught,
+two compiler-unviable, zero missed and zero timeouts, with the same 24 identities.
 [The CLI qualification record](docs/deslop-cli-tests.md) names each fault and
 the remaining coverage, mutation and quiet-host cost gates. DSLP-4 remains open.
 

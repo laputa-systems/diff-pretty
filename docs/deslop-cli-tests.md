@@ -18,10 +18,7 @@ file fixtures. Six hand faults fail the intended assertions:
 | Pager prefixes redirected input | All noninteractive option combinations must preserve the input bytes |
 
 Each fault produced its named assertion failure with Cargo exit 101, and
-restoring the source returned the CLI suites to green. The first proof driver
-expected verbose test output while Cargo printed terse output; that receipt
-was rejected. The corrected reader requires each named failure section and its
-assertion. No assertion or test was weakened to accept the receipt.
+restoring the source returned the CLI suites to green.
 
 `make test`, `make lint`, and explicit workspace-wide clippy pass with one build
 and test worker under `cpu-guard --cores 1`. `make test` uses the repository's
@@ -29,16 +26,40 @@ release profile. Workspace clippy found the pre-existing `err_expect` warning
 in a pager test; its equivalent `expect_err` assertion passes its focused test.
 These correctness runs do not establish quiet-host cost or performance.
 
-The next Scenario selects all 24 mutants in the two CLI entry points: 12 each
+The Scenario selects all 24 mutants in the two CLI entry points: 12 each
 in `src/main.rs` and `scrl/src/main.rs`. The inventory command is:
 
 ```sh
 cargo mutants --workspace --list --json --file src/main.rs --file scrl/src/main.rs
 ```
 
-Run a fresh baseline and the full workspace tests for this selection, with an
-explicit test/build timeout, one mutation worker, a twenty-minute total budget
-and the shared campaign lock. This Scenario is not yet qualified. Coverage,
+The fresh baseline and full workspace tests ran under cargo-mutants 27.1.0,
+one mutation worker, the shared campaign lock and a twenty-minute total bound:
+
+```sh
+cargo mutants --gitignore true --workspace --file src/main.rs --file scrl/src/main.rs \
+  --test-workspace true --baseline run --timeout 60 --build-timeout 300 \
+  --jobs 1 --no-shuffle --output .work/cli-scenario
+```
+
+Both runs used default mutation test/build profiles, one Cargo build job,
+`RUST_TEST_THREADS=1` and `cpu-guard --cores 1` on macOS ARM64.
+
+| Candidate | Caught | Missed | Unviable | Timeout |
+| --- | ---: | ---: | ---: | ---: |
+| `1e9ee30` | 21 | 1 | 2 | 0 |
+| `ac5ca97` | 22 | 0 | 2 | 0 |
+
+The missed inversion of the `--no-pager` comparison is observable only when
+pager choice matters; redirected process output alone cannot distinguish it.
+A literal parser-contract table now guards all supported modes and the default.
+The same inverted comparison fails that new assertion with actual `Always`
+instead of required `Never`. The two unviable default-return replacements fail
+compilation because `PagingMode` and `ParsedArgs` do not implement `Default`.
+All 24 identities match the inventory, and every caught log reports an affected
+CLI/parser, help, file or I/O contract failure. No exclusions were added.
+
+This qualifies the native CLI component's defect detection. Coverage,
 quiet-host test cost and the broader renderer/pager mutation scopes remain open.
 The old whole-workspace receipt remains incomplete: 109 untested mutants and
 48 unconfirmed timeouts are not passes. DSLP-4 remains open.
