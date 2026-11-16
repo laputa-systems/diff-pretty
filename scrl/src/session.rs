@@ -70,17 +70,21 @@ enum SourcePull {
     All,
 }
 
+struct FilteredState {
+    pattern: Regex,
+    source: Document,
+}
+
 pub struct Session {
     size: Size,
     options: SessionOptions,
     document: Document,
-    source_document: Option<Document>,
+    filtered: Option<FilteredState>,
     search: SearchState,
     top: usize,
     horizontal_offset: usize,
     wrap: bool,
     follow: bool,
-    filter: Option<Regex>,
     active_search_query: Option<String>,
     help: bool,
     finished: bool,
@@ -164,13 +168,15 @@ impl Session {
             size,
             options,
             document: Document::default(),
-            source_document: filter.as_ref().map(|_| Document::default()),
+            filtered: filter.map(|pattern| FilteredState {
+                pattern,
+                source: Document::default(),
+            }),
             search: SearchState::with_history(history),
             top: 0,
             horizontal_offset: 0,
             wrap,
             follow,
-            filter,
             active_search_query: None,
             help: false,
             finished: false,
@@ -189,8 +195,8 @@ impl Session {
         let wrap = options.wrap;
         let follow = options.follow;
         let filter = compile_filter(&options)?;
-        let (display_document, source_document) = if let Some(pattern) = &filter {
-            (document.filtered(pattern), Some(document))
+        let (display_document, filtered) = if let Some(pattern) = filter {
+            (document.filtered(&pattern), Some(FilteredState { pattern, source: document }))
         } else {
             (document, None)
         };
@@ -198,13 +204,12 @@ impl Session {
             size,
             options,
             document: display_document,
-            source_document,
+            filtered,
             search: SearchState::with_history(history),
             top: 0,
             horizontal_offset: 0,
             wrap,
             follow,
-            filter,
             active_search_query: None,
             help: false,
             finished: true,
@@ -216,43 +221,20 @@ impl Session {
     pub fn push_chunk(&mut self, chunk: &str) {
         if !self.finished {
             let last_line = self.document.line_count().checked_sub(1);
-            if self.filter.is_some() {
-                let previous_lines = self
-                    .source_document
-                    .as_ref()
-                    .expect("filtered sessions retain their source document")
-                    .line_count();
-                let stale_tail = previous_lines > 0 && {
-                    let pattern = self
-                        .filter
-                        .as_ref()
-                        .expect("filtered sessions retain their filter");
-                    self.source_document
-                        .as_ref()
-                        .expect("filtered sessions retain their source document")
-                        .line_text(previous_lines - 1)
-                        .is_some_and(|text| pattern.is_match(text))
-                };
-                self.source_document
-                    .as_mut()
-                    .expect("filtered sessions retain their source document")
-                    .append_for_session(chunk);
+            if let Some(filtered) = &mut self.filtered {
+                let previous_lines = filtered.source.line_count();
+                let stale_tail = previous_lines > 0 && filtered.source
+                    .line_text(previous_lines - 1)
+                    .is_some_and(|text| filtered.pattern.is_match(text));
+                filtered.source.append_for_session(chunk);
                 if stale_tail {
                     self.document.pop_last_line();
                 }
-                let selected = self.selected_search_match();
-                let pattern = self
-                    .filter
-                    .as_ref()
-                    .expect("filtered sessions retain their filter");
-                let source = self
-                    .source_document
-                    .as_ref()
-                    .expect("filtered sessions retain their source document");
+                let selected = Self::selected_search_match(&self.document, &mut self.search);
                 self.document.append_matching_lines(
-                    source,
+                    &filtered.source,
                     previous_lines.saturating_sub(1),
-                    pattern,
+                    &filtered.pattern,
                 );
                 self.rebuild_search_after_filter_change(selected);
             } else {
@@ -515,14 +497,13 @@ impl Session {
         (self.size.columns / 2).max(1)
     }
 
-    fn selected_search_match(&mut self) -> Option<(usize, String, Range)> {
-        let (line, match_index) = self.search.session.as_ref()?.selected?;
-        let text = self.document.line_text(line)?.to_owned();
-        let range = self
-            .search
+    fn selected_search_match(document: &Document, search: &mut SearchState) -> Option<(usize, String, Range)> {
+        let (line, match_index) = search.session.as_ref()?.selected?;
+        let text = document.line_text(line)?.to_owned();
+        let range = search
             .session
             .as_mut()?
-            .ranges(&self.document, line)
+            .ranges(document, line)
             .get(match_index)
             .copied()?;
         Some((line, text, range))

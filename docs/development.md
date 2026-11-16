@@ -29,4 +29,8 @@ named lists in `benches/bench.rs`, not a size cutoff. The `scrl` suite is in
 cargo bench -p scrl --bench bench
 ```
 
+The pager suite includes filtered streaming and redraw over real diff fixtures
+at 50-KiB, 500-KiB and 5-MiB minimum scales. It measures complete session
+construction and retained input, with exact selection and nonempty-frame checks.
+
 See [architecture](architecture.md) for source locations and [release](release.md) for artifact builds.
