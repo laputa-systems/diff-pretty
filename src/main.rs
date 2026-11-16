@@ -2,7 +2,6 @@ use std::io::{BufReader, Write};
 
 use diff_pretty::source::{PagingMode, emit_reader, should_use_pager};
 
-// The option declarations drive both recognition and the reference shown to users.
 struct OptionSpec {
     spelling: &'static str,
     suffix: &'static str,
