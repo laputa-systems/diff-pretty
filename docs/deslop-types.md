@@ -17,8 +17,8 @@ side uses `rustybench baseline --warmup 1 --runs 1 --sample-count 5
 `diff-pretty` or `scrl`. Each side passes `perf-gate-ready` before and
 `perf-gate-ready -1` afterward, under `cpu-guard --cores 6`. The benchmark
 library is rustybench 0.5.0. Renderer and pager results are collected
-separately: the CLI collector retains only the last suite from a multi-suite
-Cargo invocation, so that invocation alone does not establish renderer evidence.
+separately: the combined workspace invocation yielded only pager rows, so
+that invocation alone does not establish renderer evidence.
 
 The existing pager workloads never enable filtering. Three added workflows
 stream sorted real Git-diff fixtures through a filtered session in UTF-8-safe
