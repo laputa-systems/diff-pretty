@@ -76,7 +76,7 @@ Two hand faults fail the intended assertions: replacing centered left padding
 with zero, and changing the 10,000 loop boundary from inclusive to exclusive.
 Both faults were restored. Focused tests, the complete release workspace suite
 and warnings-denied workspace clippy pass. Current source changes are test-only.
-The source is unchanged from the saved before selection. All 38 numeric
+The production logic is unchanged from the saved before selection. All 38 numeric
 identities reconcile: that region of the older, incomplete Full run recorded
 17 caught, 20 missed and one unresolved timeout. The fresh bounded Scenario
 at `10e3782` records 37 caught, zero missed or unviable, and one timeout.
