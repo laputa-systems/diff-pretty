@@ -22,7 +22,12 @@ restored. The complete 24-mutant CLI Scenario found one missed paging binding;
 a literal parser-contract table catches it. The fresh result is 22 caught,
 two compiler-unviable, zero missed and zero timeouts, with the same 24 identities.
 [The CLI qualification record](docs/deslop-cli-tests.md) names each fault and
-the remaining coverage, mutation and quiet-host cost gates. DSLP-4 remains open.
+the remaining coverage, mutation and quiet-host cost gates. Numeric layout
+now has literal alignment and decimal-boundary oracles, each proved by a hand
+fault. Its complete 38-mutant selection records 37 caught and one hang confirmed
+with a fresh baseline and a doubled timeout, zero missed or unviable. Every
+caught log contains a new numeric assertion failure. The broader renderer/pager
+scope and quiet-host acceptance remain open; DSLP-4 remains open.
 
 Ground base: `e081d90fb98020ba64b307da178ccf3068e7e73e`. Rust code: 6.0k lines (fleet/loc/v1, vendored included, seeded). On macOS with a fresh scratch target, guarded `make test` took 15.41s cold and 1.40s warm; guarded `make lint` took 3.45s. All passed. PR CI now calls `make test`; platform-specific terminal tests run on their matching OS, and no missing-tool skip was found. No vendored trees found. The existing large-diff rendering benchmark is the declared perf workload; later scorecard measurements are pending.
 

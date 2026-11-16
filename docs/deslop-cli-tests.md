@@ -76,5 +76,31 @@ Two hand faults fail the intended assertions: replacing centered left padding
 with zero, and changing the 10,000 loop boundary from inclusive to exclusive.
 Both faults were restored. Focused tests, the complete release workspace suite
 and warnings-denied workspace clippy pass. Current source changes are test-only.
-The fresh 38-mutant numeric Scenario remains pending; this is not a complete
-renderer, pager or Tests qualification.
+The source is unchanged from the saved before selection. All 38 numeric
+identities reconcile: that region of the older, incomplete Full run recorded
+17 caught, 20 missed and one unresolved timeout. The fresh bounded Scenario
+at `10e3782` records 37 caught, zero missed or unviable, and one timeout.
+Every caught log contains a new numeric-boundary assertion failure.
+
+The timeout flips `num_digits`' loop from `n >= 10_000` to `n < 10_000`.
+For input 1, division reaches zero and the condition stays true. A fresh
+baseline passes; the exact mutant still hangs in the new digit-count test
+with a 120-second timeout, twice the first run's 60 seconds. It is a confirmed
+hang detection, not an unresolved timeout or an ordinary caught count. Both
+tool receipts return exit 3 because the tool retains the Timeout class.
+
+Both runs use cargo-mutants 27.1.0, two guarded cores, one build job and test
+thread, one mutation worker, a 300-second build timeout and a 1,200-second
+total bound. Reproduce the complete selection with:
+
+```sh
+cargo mutants --gitignore true --workspace --file src/config.rs \
+  --test-workspace true --baseline run --timeout 60 --build-timeout 300 \
+  --jobs 1 --no-shuffle --output .work/config-scenario
+```
+
+Repeat the one timeout with `--timeout 120` and
+`--re '^src/config[.]rs:80:13: replace >= with < in num_digits$'` in a separate
+output directory. No exclusion was added. This qualifies the numeric component
+with 37 caught and one confirmed hang; the broader renderer/pager mutation,
+coverage, quiet-host cost and whole-change CI lane remain open.
