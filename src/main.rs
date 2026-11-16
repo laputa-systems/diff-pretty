@@ -100,6 +100,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn supported_paging_flags_choose_the_requested_mode() {
+        let cases: &[(&[&str], PagingMode)] = &[
+            (&[], PagingMode::Always),
+            (&["--paging=auto"], PagingMode::Auto),
+            (&["--paging=always"], PagingMode::Always),
+            (&["--paging=never"], PagingMode::Never),
+            (&["--no-pager"], PagingMode::Never),
+        ];
+        for (arguments, expected) in cases {
+            let actual = parse_paging(arguments.iter().map(|argument| (*argument).to_owned())).unwrap();
+            assert_eq!(actual, *expected, "{arguments:?}");
+        }
+    }
+
+    #[test]
     fn examples_parse_and_option_spellings_are_unique() {
         for example in EXAMPLES {
             assert!(matches!(
