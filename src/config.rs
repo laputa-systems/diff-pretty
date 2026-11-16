@@ -91,3 +91,47 @@ pub fn num_digits(mut n: usize) -> usize {
         len + 1
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{num_digits, pad_number, push_pad_number};
+
+    #[test]
+    fn number_cells_match_the_documented_alignment() {
+        for (number, width, expected) in [
+            (None, 0, ""), (None, 4, "    "), (Some(0), 0, "0"),
+            (Some(0), 4, "  0 "), (Some(1), 4, "  1 "),
+            (Some(12), 4, " 12 "), (Some(123), 4, " 123"),
+            (Some(1234), 4, "1234"), (Some(12345), 4, "12345"),
+            (Some(1), 5, "  1  "), (Some(12), 5, "  12 "),
+            (Some(123), 5, " 123 "), (Some(1), 1, "1"),
+        ] {
+            assert_eq!(pad_number(number, width), expected, "{number:?}, {width}");
+            let mut appended = String::from("prefix:");
+            push_pad_number(&mut appended, number, width);
+            assert_eq!(appended, format!("prefix:{expected}"), "{number:?}, {width}");
+        }
+    }
+
+    #[test]
+    fn digit_counts_change_at_each_decimal_boundary() {
+        assert_eq!(num_digits(0), 1);
+        assert_eq!(num_digits(1), 1);
+        for (power, digits) in [
+            (10_u64, 2), (100, 3), (1_000, 4), (10_000, 5),
+            (100_000, 6), (1_000_000, 7), (10_000_000, 8),
+            (100_000_000, 9), (1_000_000_000, 10), (10_000_000_000, 11),
+            (100_000_000_000, 12), (1_000_000_000_000, 13),
+            (10_000_000_000_000, 14), (100_000_000_000_000, 15),
+            (1_000_000_000_000_000, 16), (10_000_000_000_000_000, 17),
+            (100_000_000_000_000_000, 18), (1_000_000_000_000_000_000, 19),
+            (10_000_000_000_000_000_000, 20),
+        ] {
+            if let Ok(power) = usize::try_from(power) {
+                assert_eq!(num_digits(power - 1), digits - 1, "below {power}");
+                assert_eq!(num_digits(power), digits, "at {power}");
+                assert_eq!(num_digits(power + 1), digits, "above {power}");
+            }
+        }
+    }
+}

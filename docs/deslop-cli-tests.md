@@ -63,3 +63,18 @@ This qualifies the native CLI component's defect detection. Coverage,
 quiet-host test cost and the broader renderer/pager mutation scopes remain open.
 The old whole-workspace receipt remains incomplete: 109 untested mutants and
 48 unconfirmed timeouts are not passes. DSLP-4 remains open.
+
+## Numeric layout boundary
+
+The next bounded component is the exported `config` API. Literal cell strings
+cover missing numbers, zero width, parity, overflow width and append behavior.
+Decimal digit counts cover zero and both sides of every representable power
+of ten through 10^19. The expected strings and digit counts are independent
+of the functions under test.
+
+Two hand faults fail the intended assertions: replacing centered left padding
+with zero, and changing the 10,000 loop boundary from inclusive to exclusive.
+Both faults were restored. Focused tests, the complete release workspace suite
+and warnings-denied workspace clippy pass. Current source changes are test-only.
+The fresh 38-mutant numeric Scenario remains pending; this is not a complete
+renderer, pager or Tests qualification.
