@@ -21,6 +21,14 @@ Types: escape-hatch lines 139 → 133. Candidate findings are deduplicated sourc
 | redundant_clone | 2 | 0 | 2 | reject: not a typing defect |
 | needless_pass_by_value | 0 | 0 | 0 | reject: no witness |
 
+Types qualification: [evidence](docs/deslop-types.md). The private filtered
+state witness rejects a missing source with E0308. Workspace tests and lint
+pass. Five interleaved pairs for both renderer and pager suites, including
+real filtered streaming at three scales, pass the host gates; no slowdown
+exceeds both 2% and the observed spread. Reported allocation counters and
+release binary sizes are unchanged; peak RSS ranges overlap. Public APIs,
+formats and dependencies are unchanged. The workspace is the affected consumer.
+
 ## Tickets
 
 
