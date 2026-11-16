@@ -15,7 +15,12 @@ unverified; DSLP-4 stays open. The before coverage is 3025/4182 lines and
 timeouts), leaving 109 untested. It is not a pass. Preserve
 `.work/mutants-workspace-before/` and `.work/tmp/mutation-before.log`.
 The current component selection needs narrowing before another bounded run.
-Work is stopped; resume only at the owner's request.
+The owner resumed on 2026-11-16. The branch now contains current main and the
+full-help contract. Eleven current CLI cases, the full workspace suite and
+workspace clippy pass. Six hand faults fail their intended assertions and are
+restored. The next Scenario inventories 24 CLI mutants; it has not run yet.
+[The CLI qualification record](docs/deslop-cli-tests.md) names each fault and
+the remaining coverage, mutation and quiet-host cost gates. DSLP-4 remains open.
 
 Ground base: `e081d90fb98020ba64b307da178ccf3068e7e73e`. Rust code: 6.0k lines (fleet/loc/v1, vendored included, seeded). On macOS with a fresh scratch target, guarded `make test` took 15.41s cold and 1.40s warm; guarded `make lint` took 3.45s. All passed. PR CI now calls `make test`; platform-specific terminal tests run on their matching OS, and no missing-tool skip was found. No vendored trees found. The existing large-diff rendering benchmark is the declared perf workload; later scorecard measurements are pending.
 
