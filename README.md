@@ -24,6 +24,8 @@ git show | diff-pretty
 diff-pretty --paging=never < changes.patch
 ```
 
+Run `diff-pretty -h` or `diff-pretty --help` for the complete command reference.
+
 Paging options are `--paging=auto`, `--paging=always`, and `--paging=never`;
 `--no-pager` is an alias for `never`. The default is `always`: an interactive
 terminal opens the built-in pager, while redirected output is written directly.
