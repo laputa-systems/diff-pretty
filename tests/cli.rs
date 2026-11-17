@@ -96,15 +96,32 @@ fn terminal_controls_preserve_literal_metadata_and_hunk_text() {
         "\x1bPpayload\x1b\\\x1b^payload\x1b\\\x1b_payload\x1b\\\x1bXpayload\x1b\\\x1b7\x1béR\n",
         "tail\x1b[31\n",
         "tail\x1b]title\n",
+        "bare\x1b\n",
+        "invalid\x1b[ 1mZ\n",
+        "utf8\x1b[éZ\n",
+        "osc\x1b]title\x07end\n",
+        "dcs\x1bPp\\a\x1bZy\x07z\x1b\\end\n",
         "\x1b[31mdiff --git a/a b/a\x1b[0m\n",
         "--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n",
         "+é\tbefore\0\x07\x7f\x1b[2J\x1b]title\x07\x1bPpayload\x1b\\文字after\n",
     );
     let expected = concat!(
-        "plain é文字\tkeep\nLéR\ntail[31\ntail]title\n",
+        "plain é文字\tkeep\nLéR\ntail[31\ntail]title\nbare\n",
+        "invalid[ 1mZ\nutf8[éZ\noscend\ndcsend\n",
         "\n\x1b[34mΔ a\x1b[0m\n",
         "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n\n",
         "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32mé        before文字after\x1b[0m\n",
+    );
+    let output = support::run(command(&["--no-pager"]), Some(input.as_bytes()));
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, expected.as_bytes());
+    assert!(output.stderr.is_empty());
+
+    let input = "--- a/same\n+++ b/same\n@@ -0,0 +1 @@\n+é\0\u{85}\u{9b}x\tend\n";
+    let expected = concat!(
+        "\n\x1b[34mΔ a/same ⟶   b/same\x1b[0m\n",
+        "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n\n",
+        "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32méx        end\x1b[0m\n",
     );
     let output = support::run(command(&["--no-pager"]), Some(input.as_bytes()));
     assert_eq!(output.status.code(), Some(0));

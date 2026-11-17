@@ -685,14 +685,8 @@ fn render_chunk(
     // controls there, and use a stripped copy for parsing; hunk lines are
     // restyled regardless of input color.
     let raw_lines: Vec<&str> = input.lines().collect();
-    // The stripped copy is borrowed where possible. Plain inputs (no ESC) borrow
-    // `raw_lines` directly and allocate nothing; colorized inputs are stripped
-    // into a single scratch buffer, so the N per-line `String`s of the old
-    // approach collapse into one allocation. `scratch` is pre-sized to the
-    // input (stripping only removes bytes), so it never reallocates and the
-    // recorded byte ranges stay valid.
     let mut scratch = String::new();
-    let lines: Cow<'_, [&str]> = if input.as_bytes().contains(&b'\x1b') {
+    let lines: Cow<'_, [&str]> = if raw_lines.iter().any(|line| has_terminal_controls(line)) {
         scratch.reserve(input.len());
         let mut ranges: Vec<(usize, usize)> = Vec::with_capacity(raw_lines.len());
         for l in &raw_lines {
@@ -1121,12 +1115,14 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {
     Cow::Owned(s.replace('\t', TAB_STOP))
 }
 
+fn has_terminal_controls(line: &str) -> bool {
+    line.chars().any(|character| character.is_control() && character != '\t')
+}
+
 /// Remove terminal control sequences and bare controls from parser input,
 /// except tabs, which the renderer expands in hunk content.
 fn strip_terminal_controls_append(s: &str, scratch: &mut String) {
-    if !s.as_bytes().contains(&b'\x1b')
-        && !s.chars().any(|character| character.is_control() && character != '\t')
-    {
+    if !has_terminal_controls(s) {
         scratch.push_str(s);
         return;
     }
