@@ -5,6 +5,13 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+Current native workspace coverage at runtime `de831c1` passes all 70 tests:
+3,246/4,308 lines and 593/924 branches. The public pager adapter, live session
+and terminal decisions, other renderer regions and remaining streaming/error
+branches still need witnesses or dispositions. This does not qualify the old
+Full survivors, Linux behavior or busy-host cost/performance gates; DSLP-4
+remains open. Commands and limits: [coverage record](docs/deslop-cli-tests.md#current-workspace-branch-coverage).
+
 Owner stop, 2026-11-16: the Tests continuation adds nine CLI process cases
 across diff-pretty and scrl, with owned-child deadlines and literal output,
 file, error and closed-pipe contracts. Those cases and `make lint` passed.

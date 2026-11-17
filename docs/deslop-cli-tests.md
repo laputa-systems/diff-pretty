@@ -179,3 +179,48 @@ memory observations, not a claim of reduced memory use or production limits.
 Perf gate deferred: host busy. The declared workload's five paired timing runs,
 test-cost acceptance, coverage and other decision regions remain open; the
 draft stays unmerged.
+
+## Current workspace branch coverage
+
+At runtime revision `de831c1264a464784e484267f3604dea04667ce9`, macOS ARM64,
+the pinned nightly and cargo-llvm-cov 0.9.1, the complete workspace coverage
+run passes all 70 tests with no ignored cases. Default features and debug
+instrumentation cover 3,246/4,308 lines and 593/924 branches across the 13
+executable first-party source files. The historical before result was
+3,025/4,182 lines and 542/918 branches; changed denominators prevent treating
+the difference as a fixed-scope detection score. Coverage is a report, not
+an acceptance threshold or proof that an assertion detects a defect.
+
+The report leaves these decisions open:
+
+- `src/source.rs`: `emit_reader` and `DiffSource::produce` are unexercised.
+  Redirected CLI tests take main's direct rendering branch, so they do not
+  witness this public adapter or the live pager. Add an owned PTY scenario
+  and an adapter-level output/error oracle; do not infer a pass from the
+  renderer tests.
+- `scrl/src/session.rs` and `scrl/src/terminal.rs`: live session, event and
+  terminal lifecycle paths remain partly unrun. DSLP-8's retained-source
+  runner is a liveness investigation, not permission to label these paths
+  unreachable or remove them.
+- `src/render.rs`: metadata/hunk rendering decisions outside the qualified
+  sanitizer remain open. Within the sanitizer, the non-ESC scanner entry
+  and metadata `None` fallback are guarded by their callers, as the mutation
+  equivalence arguments above explain.
+- Search, document editing and streaming-source error decisions in `scrl`
+  still need individual witnesses or dispositions. This native report does
+  not qualify Linux-specific terminal behavior or the old Full survivors.
+
+Reproduce under the shared mutation/coverage lock, with
+`PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`, `TMPDIR=$PWD/.work/tmp`,
+`RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`, `RUST_TEST_THREADS=1` and
+`CARGO_TARGET_DIR=$PWD/.work/target-coverage-controls`:
+
+```sh
+cpu-guard --cores 2 -- cargo llvm-cov --workspace --branch --json \
+  --output-path .work/tmp/coverage-controls.json
+cpu-guard --cores 2 -- cargo llvm-cov report --workspace --branch --summary-only
+```
+
+Both commands exit 0. Keep `--workspace` on the report command too: omitting
+it reports only the renderer package, not this result. Timing/test-cost and
+performance gates remain deferred on the busy host; DSLP-4 stays open.
