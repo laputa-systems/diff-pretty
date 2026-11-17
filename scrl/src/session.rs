@@ -1320,6 +1320,101 @@ impl Document {
 mod tests {
     use super::*;
 
+    fn session_navigation_frame(pager: &mut Session, expected: &[u8]) {
+        let mut frame = Vec::new();
+        pager.draw(&mut frame).unwrap();
+        assert!(frame.starts_with(expected), "frame: {:?}", String::from_utf8_lossy(&frame));
+    }
+
+    #[test]
+    fn session_navigation_pages_edges_and_horizontal() {
+        let mut pager = Session::new(Size { rows: 4, columns: 8 }, SessionOptions::default()).unwrap();
+        pager.push_chunk("zero0000\none11111\ntwo22222\nthree333\nfour4444\nfive5555\nsix66666");
+        pager.finish();
+        let cases: &[(Event, &[u8])] = &[
+            (Event::Up, b"\x1b[H\x1b[2K\rzero0000\x1b[0m\n\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m"),
+            (Event::PageDown, b"\x1b[H\x1b[2K\rthree333\x1b[0m\n\x1b[2K\rfour4444\x1b[0m\n\x1b[2K\rfive5555\x1b[0m"),
+            (Event::Down, b"\x1b[H\x1b[2K\rfour4444\x1b[0m\n\x1b[2K\rfive5555\x1b[0m\n\x1b[2K\rsix66666\x1b[0m"),
+            (Event::End, b"\x1b[H\x1b[2K\rfour4444\x1b[0m\n\x1b[2K\rfive5555\x1b[0m\n\x1b[2K\rsix66666\x1b[0m"),
+            (Event::PageUp, b"\x1b[H\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m\n\x1b[2K\rthree333\x1b[0m"),
+            (Event::Home, b"\x1b[H\x1b[2K\rzero0000\x1b[0m\n\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m"),
+            (Event::Right, b"\x1b[H\x1b[2K\r0000\x1b[0m\n\x1b[2K\r1111\x1b[0m\n\x1b[2K\r2222\x1b[0m"),
+            (Event::Left, b"\x1b[H\x1b[2K\rzero0000\x1b[0m\n\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m"),
+        ];
+        for &(event, frame) in cases {
+            assert_eq!(pager.handle(event), Action::Continue { changed: true }, "{event:?}");
+            session_navigation_frame(&mut pager, frame);
+        }
+        assert_eq!(pager.handle(Event::Text('x')), Action::Continue { changed: false });
+        assert_eq!(pager.handle(Event::Text('q')), Action::Quit);
+    }
+
+    #[test]
+    fn session_navigation_modes_and_sizes() {
+        let mut pager = Session::new(Size { rows: 3, columns: 8 }, SessionOptions { follow: true, ..SessionOptions::default() }).unwrap();
+        pager.push_chunk("one\ntwo\nthree\nfour");
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rthree\x1b[0m\n\x1b[2K\rfour\x1b[0m");
+        assert_eq!(pager.handle(Event::Home), Action::Continue { changed: true });
+        pager.push_chunk("\nfive");
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rfour\x1b[0m\n\x1b[2K\rfive\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('h')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\r scrl help\n\x1b[2K\r");
+        assert_eq!(pager.handle(Event::Down), Action::Continue { changed: false });
+        assert_eq!(pager.handle(Event::Text('q')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rfour\x1b[0m\n\x1b[2K\rfive\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('/')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Text('q')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::PageDown), Action::Continue { changed: false });
+        assert_eq!(pager.handle(Event::Escape), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rfour\x1b[0m\n\x1b[2K\rfive\x1b[0m");
+        assert_eq!(pager.handle(Event::Interrupt), Action::Quit);
+
+        let mut small = Session::new(Size { rows: 1, columns: 1 }, SessionOptions::default()).unwrap();
+        small.push_chunk("ab\ncd");
+        small.finish();
+        assert_eq!(small.handle(Event::End), Action::Continue { changed: true });
+        session_navigation_frame(&mut small, b"\x1b[H\x1b[2K\rcd\x1b[0m");
+        assert_eq!(small.handle(Event::Right), Action::Continue { changed: true });
+        session_navigation_frame(&mut small, b"\x1b[H\x1b[2K\rd\x1b[0m");
+    }
+
+    #[test]
+    fn session_navigation_routing_and_search_cursor() {
+        let mut pager = Session::new(Size { rows: 3, columns: 30 }, SessionOptions::default()).unwrap();
+        pager.push_chunk("hit\none\ntwo\nhit\nfour\nfive\nhit\nseven");
+        pager.finish();
+        assert_eq!(pager.handle(Event::Text('j')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rone\x1b[0m\n\x1b[2K\rtwo\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('k')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::End), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Down), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rhit\x1b[0m\n\x1b[2K\rseven\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('h')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Interrupt), Action::Quit);
+        assert_eq!(pager.handle(Event::Escape), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Text('/')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Interrupt), Action::Quit);
+        for event in [Event::Text('a'), Event::Text('b'), Event::Home, Event::Right, Event::Text('x'), Event::End, Event::Text('z')] {
+            assert_eq!(pager.handle(event), Action::Continue { changed: true });
+        }
+        let mut frame = Vec::new();
+        pager.draw(&mut frame).unwrap();
+        assert!(frame.ends_with(b"\x1b[7m /axbz\x1b[0m"), "{:?}", String::from_utf8_lossy(&frame));
+        assert_eq!(pager.handle(Event::CtrlU), Action::Continue { changed: true });
+        frame.clear();
+        pager.draw(&mut frame).unwrap();
+        assert!(frame.ends_with(b"\x1b[7m /\x1b[0m"));
+        for ch in "hit".chars() { pager.handle(Event::Text(ch)); }
+        pager.handle(Event::Enter);
+        pager.handle(Event::Text('n'));
+        pager.handle(Event::Text('n'));
+        assert_eq!(pager.handle(Event::Text('N')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rtwo\x1b[0m\n\x1b[2K\r\x1b[0m\x1b[48;5;226;30mhit");
+        assert_eq!(pager.handle(Event::Text('n')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Up), Action::Continue { changed: true });
+        assert!(!pager.advance());
+    }
+
     struct WriteCounter {
         writes: usize,
         flushes: usize,

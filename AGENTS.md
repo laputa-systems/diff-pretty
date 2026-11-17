@@ -30,7 +30,7 @@ Rust renderer for Git-style unified diffs with an optional built-in pager.
 - Renderer API: `src/render.rs` tests; alignment API: `tests/alignment_api.rs`; remaining exported API: none.
 - Numeric layout API: `src/config.rs` literal cell, append and decimal-boundary tests; both hand faults fail their intended assertions.
 - Terminal controls: literal direct/reader/incremental API cases and an owned-child CLI oracle. The current 79-case selection has 70 caught, eight equivalent misses, one unviable and no timeouts; no exclusions. See `docs/deslop-cli-tests.md` for scope and dispositions. Quiet-host acceptance remains open.
-- `scrl` library document, search, source and session behavior: tests in `scrl/src/`; full API coverage: none.
+- `scrl` library document, search, source and session behavior: tests in `scrl/src/`; session navigation frames/actions and complete 44-mutant five-method selection: [proof](docs/deslop-cli-tests.md#session-navigation). Live-loop, draw and full API coverage remain open.
 - Library consumers: `diff-pretty` uses `scrl`; `tests/alignment_api.rs` and root benchmarks use `diff-pretty`. External consumers are unknown.
 - Perf workload: `make bench` (`benches/bench.rs`, including `render_show_large` and streaming); large diffs exercise the user-visible rendering hot path. It requires sibling `rustybench` or `RUSTYBENCH` override.
 - CI suite has no missing-tool skip found; OS-gated terminal tests run on their matching Linux/macOS runner. No vendored trees found.

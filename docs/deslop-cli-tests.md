@@ -332,3 +332,40 @@ all passed with the same guarded environment. The workspace run included the
 for macOS; Linux-specific behavior and quiet-host performance remain unverified.
 The parent final suite has 81 executable cases and one doctest, with zero
 ignored cases. The source production hash above is unchanged.
+
+## Session navigation
+
+At base `bfc55a25ddc92234676f05ebfedff2154ed02066`, three
+`session_navigation` tests drive the public `Session` over literal text and
+assert visible frame bytes and `Action`s. They cover page, edge and horizontal
+movement, follow, help, search input and match routing, plus initial sizes 4x8,
+3x8 and 1x1. `Event` has no resize or half-page variant and `Session` has no
+resize method; changing dimensions of a running session is not witnessed.
+The live loop and broader draw, lifecycle and coverage gaps remain open; the
+legacy terminal runner remains the DSLP-8 lead.
+
+On macOS arm64, cargo-mutants 27.1.0 generated 44 identities in `handle`,
+`content_rows`, `max_top`, `clamp_top` and `horizontal_shift`; the JSON
+inventory filtered by function identity exactly equals the selected names.
+The fresh baseline ran 39 scrl library tests including all three new tests.
+The complete receipt has 43 caught, one unviable, zero misses and zero
+timeouts, outer exit 0. The unviable replacement of `handle` with
+`Default::default()` fails E0277 because `Action` has no `Default`. An earlier
+run had 11 misses; a second had one (`Up` match routing); new observable
+assertions caught all of them. There are no exclusions.
+
+With the shared atomic mutation lock, one build job and test thread, a distinct
+mutation target, and `PATH`, `TMPDIR` and `RUSTC_WRAPPER=kache` from the shared
+worker contract, the receipt command was:
+
+```sh
+timeout -k 5 1200 cpu-guard --cores 2 -- cargo mutants --in-place --no-config --skip-calls-defaults=false -f scrl/src/session.rs -p scrl --test-package scrl -F 'Session::(handle|content_rows|max_top|clamp_top|horizontal_shift)' --timeout 60 --build-timeout 300 --output .work/tmp/session-mutation-receipt -- --lib --offline
+```
+
+Replacing page-down's addition of `content_rows()` with `1` made
+`session_navigation_pages_edges_and_horizontal` fail its frame assertion
+(exit 101); the fault was restored before final checks. The final ordinary target passed `cpu-guard --cores 2 -- make test` (84
+executable tests and one doctest, none ignored), `cpu-guard --cores 2 -- make
+lint`, and `cpu-guard --cores 2 -- cargo clippy --workspace --all-targets
+--all-features -- --deny warnings`, each exit 0. The old incomplete workspace
+mutation run and DSLP-4 are not qualified by this component run.
