@@ -1,5 +1,13 @@
 # Session draw boundary
 
+Parent acceptance removes a vacuous empty-buffer assertion after an event
+that receives no writer; the changed-action and complete repeated-frame
+assertions remain. The three focused scenarios pass again, exit 0. Final
+session SHA-256 is
+`f598956b76255b6ba26b45d9972158fbd37b2281a6e0e52c00fa42a8ce74633a`;
+the earlier hash below identifies the mutation-tested assertions, unchanged
+except for that redundant assertion. No production code changed.
+
 Scope: public `Session::draw`, including help routed through it; no terminal loop, resize, renderer or classifier inventory. Base revision `5285283d20f1cecdf6a89b688d351a9e1140d829`; base session SHA-256 `f4550d691a16075f54d2ab126bc82cc21040c9a949461f08f025cf6c2884e8ad`. Tests use literal whole frames, including status and help at one and twelve rows, search input, repeat drawing, and real `Write` failures for both modes. An unchanged event returns `changed: false`; an explicit repeated draw emits the same complete frame. The caller decides whether to draw after an event.
 
 Environment: macOS arm64, rustc 1.102.0-nightly (5b7b37aef 2026-11-08), cargo 1.102.0-nightly (c07ac2c4d 2026-11-06), cargo-mutants 27.1.0. Cargo.lock SHA-256 `11fa85bf38485289c3efc7e6e406251179f8a4ba0e71130820e1d33ffb72d2c8`. Commands below run from repository root with `PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`, `TMPDIR=$PWD/.work/tmp`, `RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`; create `.work/tmp` first. Ordinary and mutation targets are distinct. No benchmark was run.

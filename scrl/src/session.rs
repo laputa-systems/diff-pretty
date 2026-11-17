@@ -1426,7 +1426,6 @@ mod tests {
         assert_eq!(output, normal);
         output.clear();
         assert_eq!(pager.handle(Event::Text('x')), Action::Continue { changed: false });
-        assert!(output.is_empty());
         pager.draw(&mut output).unwrap();
         assert_eq!(output, normal);
         assert_eq!(pager.handle(Event::Text('?')), Action::Continue { changed: true });
