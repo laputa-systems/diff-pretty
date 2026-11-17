@@ -88,8 +88,31 @@ fn bare_invocation_still_renders_stdin() {
     assert!(output.stderr.is_empty());
 }
 
+#[path = "support/bare_controls.rs"]
+mod bare_controls;
+
 #[test]
-fn terminal_controls_preserve_literal_metadata_and_hunk_text() {
+fn terminal_controls_preserve_metadata_and_hunk_text() {
+    let cases = [
+        (
+            "--- a/same\n+++ b/same\n@@ -0,0 +1 @@\n+é\0\x7f\u{85}\u{9b}x\tend\n",
+            concat!("\n\x1b[34mΔ a/same ⟶   b/same\x1b[0m\n", "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n\n", "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32méx        end\x1b[0m\n"),
+        ),
+        (
+            concat!("plain é文字\tkeep\n", "\x1b[31mdiff --git a/a b/a\x1b[0m\n", "--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n", "+é\tbefore\0\x07\x7f\x1b[2J\x1b]title\x07\x1bPpayload\x1b\\文字after\n"),
+            concat!("plain é文字\tkeep\n", "\n\x1b[34mΔ a\x1b[0m\n", "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n\n", "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32mé        before文字after\x1b[0m\n"),
+        ),
+    ];
+    for (input, expected) in cases {
+        let output = bare_controls::run(input);
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout, expected.as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn extended_terminal_controls_preserve_literal_metadata_and_hunk_text() {
     let input = concat!(
         "plain é文字\tkeep\n",
         "L\0\u{85}\u{9b}\x1b[?25l\x1b[1 q\x1b]title\x07\x1b]title\x1b\\",
@@ -111,17 +134,6 @@ fn terminal_controls_preserve_literal_metadata_and_hunk_text() {
         "\n\x1b[34mΔ a\x1b[0m\n",
         "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n\n",
         "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32mé        before文字after\x1b[0m\n",
-    );
-    let output = support::run(command(&["--no-pager"]), Some(input.as_bytes()));
-    assert_eq!(output.status.code(), Some(0));
-    assert_eq!(output.stdout, expected.as_bytes());
-    assert!(output.stderr.is_empty());
-
-    let input = "--- a/same\n+++ b/same\n@@ -0,0 +1 @@\n+é\0\u{85}\u{9b}x\tend\n";
-    let expected = concat!(
-        "\n\x1b[34mΔ a/same ⟶   b/same\x1b[0m\n",
-        "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n\n",
-        "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32méx        end\x1b[0m\n",
     );
     let output = support::run(command(&["--no-pager"]), Some(input.as_bytes()));
     assert_eq!(output.status.code(), Some(0));
