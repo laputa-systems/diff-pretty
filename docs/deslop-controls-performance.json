@@ -2771,5 +2771,132 @@
       "Profiling builds retain symbols and line info; these are not the shipped binaries used for timings",
       "Inlining prevents attributing all control-scan costs to one source line"
     ]
+  },
+  "shipping_cli_process_check": {
+    "baseline_revision": "6ba0962f002cd0f03ad50ede43216bf581a8c228",
+    "candidate_revision": "6653924a49a2bf92406d3277831616575a8a7f29",
+    "workload": "30 fresh shipped CLI processes per sample, concatenated 103-fixture corpus, --no-pager, redirected output; five alternating pairs",
+    "gates": "All ten pre/run/immediate-post triples exited 0; production normal/build/features trees matched after checkout path normalization",
+    "samples": [
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1047090166,
+        "child_user_seconds": 0.25172,
+        "child_system_seconds": 0.5609299999999999,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1047601792,
+        "child_user_seconds": 0.251065,
+        "child_system_seconds": 0.554161,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1044432750,
+        "child_user_seconds": 0.250889,
+        "child_system_seconds": 0.5541039999999999,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1050420875,
+        "child_user_seconds": 0.251411,
+        "child_system_seconds": 0.556511,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1045509042,
+        "child_user_seconds": 0.251487,
+        "child_system_seconds": 0.5544309999999999,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1036591042,
+        "child_user_seconds": 0.252926,
+        "child_system_seconds": 0.556638,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1030218791,
+        "child_user_seconds": 0.262604,
+        "child_system_seconds": 0.580897,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1016043667,
+        "child_user_seconds": 0.25027,
+        "child_system_seconds": 0.54336,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1004921542,
+        "child_user_seconds": 0.266626,
+        "child_system_seconds": 0.600304,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "calls": 30,
+        "wall_ns": 1041415417,
+        "child_user_seconds": 0.25529599999999997,
+        "child_system_seconds": 0.553285,
+        "stdout_bytes": 680988,
+        "stdout_sha256": "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+      }
+    ],
+    "summary": [
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "per_call_median_ns": 34903005.53333333,
+        "range_ns": 199604.16666666418,
+        "output": [
+          [
+            680988,
+            "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+          ]
+        ]
+      },
+      {
+        "binary": "/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty",
+        "per_call_median_ns": 34340626.36666667,
+        "range_ns": 1216462.5,
+        "output": [
+          [
+            680988,
+            "2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772"
+          ]
+        ]
+      }
+    ],
+    "verdict": "No regression in this process-level workload. Medians 34.903 ms baseline and 34.341 ms candidate are within the 1.216 ms larger-side range. No speedup claim; this does not resolve the earlier library corpus regression.",
+    "reproduction": {
+      "measurement_python": "import hashlib\nimport json\nimport resource\nimport subprocess\nimport sys\nimport time\n\nbinary, corpus = sys.argv[1:]\n\n\ndef invoke(output):\n    with open(corpus, \"rb\") as source:\n        result = subprocess.run([binary, \"--no-pager\"], stdin=source, stdout=output,\n                                stderr=subprocess.PIPE, timeout=5, check=True)\n    assert not result.stderr, result.stderr\n    return result.stdout\n\n\nreference = invoke(subprocess.PIPE)\ninvoke(subprocess.DEVNULL)\nbefore = resource.getrusage(resource.RUSAGE_CHILDREN)\nstart = time.perf_counter_ns()\nfor _ in range(30):\n    invoke(subprocess.DEVNULL)\nelapsed = time.perf_counter_ns() - start\nafter = resource.getrusage(resource.RUSAGE_CHILDREN)\nprint(json.dumps({\"binary\": binary, \"calls\": 30, \"wall_ns\": elapsed,\n                  \"child_user_seconds\": after.ru_utime - before.ru_utime,\n                  \"child_system_seconds\": after.ru_stime - before.ru_stime,\n                  \"stdout_bytes\": len(reference),\n                  \"stdout_sha256\": hashlib.sha256(reference).hexdigest()}))\n",
+      "controller_zsh": "#!/bin/zsh\nset -u\nroot=/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds\nbase=/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ab\nexport PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=clang RUSTFLAGS='-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -Clink-arg=-Wl,-dead_strip_dylibs'\nfor tree in \"$base\" \"$root\"; do\n  cd \"$tree\" || exit 1\n  export TMPDIR=$PWD/.work/tmp CARGO_TARGET_DIR=$PWD/.work/shipping-cli-target\n  mkdir -p \"$TMPDIR\"\n  cpu-guard --cores 2 -- cargo build --bin diff-pretty --profile dist -Z build-std=std -Z build-std-features= --target aarch64-apple-darwin > .work/tmp/shipping-cli-build.log 2>&1 || exit 49\n  cargo tree --locked --offline --target aarch64-apple-darwin -e normal,build,features | jaq -Rs --arg tree \"$PWD\" 'split($tree)|join(\"CHECKOUT\")' > .work/tmp/shipping-cli-features.json\ndone\ncmp \"$base/.work/tmp/shipping-cli-features.json\" \"$root/.work/tmp/shipping-cli-features.json\" || exit 48\ncd \"$root\" || exit 1\ncat fixtures/*.patch > .work/tmp/shipping-cli-corpus.patch\nfor iteration in 1 2 3 4 5; do\n  if (( iteration % 2 == 1 )); then sides=(base current); else sides=(current base); fi\n  for side in \"${sides[@]}\"; do\n    if [ \"$side\" = base ]; then tree=$base; else tree=$root; fi\n    label=shipping-cli-${iteration}-${side}\n    uptime > \".work/tmp/$label.load\"\n    perf-gate-ready > \".work/tmp/$label.pre\" 2>&1\n    pre=$?\n    if [ \"$pre\" -ne 0 ]; then print \"$label pre=$pre\"; exit 50; fi\n    cpu-guard --cores 2 -- uv run --no-project --python 3.15 --no-python-downloads python /Users/josh/d/stuff/.work/tmp/measure-shipping-diff.py \"$tree/.work/shipping-cli-target/aarch64-apple-darwin/dist/diff-pretty\" \"$root/.work/tmp/shipping-cli-corpus.patch\" > \".work/tmp/$label.json\" 2> \".work/tmp/$label.log\"\n    run=$?\n    perf-gate-ready -1 > \".work/tmp/$label.post\" 2>&1\n    post=$?\n    print \"$label pre=$pre run=$run post=$post\"\n    if [ \"$run\" -ne 0 ] || [ \"$post\" -ne 0 ]; then exit 51; fi\n  done\ndone\n"
+    }
   }
 }
