@@ -65,3 +65,13 @@ bench-diff:
 	@BASELINE="$(CURDIR)/benches/baseline.json"; \
 	test -f "$$BASELINE" || { echo "no baseline yet; run 'make bench' first" >&2; exit 1; }; \
 	$(RUSTYBENCH) diff "$$BASELINE" "$(AFTER)"
+
+# BASE must name the target branch or its merge base; SHARD is one CI partition.
+.PHONY: mutants-diff mutants-gate-test
+mutants-diff: export BASE SHARD
+mutants-diff:
+	@test -n "$$BASE" && test -n "$$SHARD" || { echo 'BASE and SHARD are required' >&2; exit 2; }
+	python3 -B scripts/mutants_gate.py "$$BASE" --shard "$$SHARD"
+
+mutants-gate-test:
+	python3 -B -m unittest discover -s scripts -p test_mutants_gate.py
