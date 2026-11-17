@@ -1,0 +1,978 @@
+{
+  "verdict": "inconclusive; optimization rejected and candidate remains parked",
+  "acceptance": "not met",
+  "base_revision": "49a1c97d1f60932c3d860318672ecdcc545a0986",
+  "admission_revision": "a62779107f111ee072f467d4f951098e8df1c106",
+  "candidate_source_sha256": "ca33beb0e8b0ad1ead28f1a11321ce91e5b7a9f7db48ed77236a2a1f369c1db0",
+  "attempt_patch_sha256": "a2b20c97ab71101cd752edd9c8f258ca0e3747485751573cf96bdcfed7789537",
+  "attempt_patch": "diff --git a/src/render.rs b/src/render.rs\nindex 187d7f8..23ff759 100644\n--- a/src/render.rs\n+++ b/src/render.rs\n@@ -1116,7 +1116,7 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {\n }\n \n fn has_terminal_controls(line: &str) -> bool {\n-    line.chars().any(|character| character.is_control() && character != '\\t')\n+    line.bytes().any(|byte| (byte < 0x20 && byte != b'\\t') || byte == 0x7f || byte == 0xc2)\n }\n \n /// Remove terminal control sequences and bare controls from parser input,\n@@ -1475,6 +1475,25 @@ mod tests {\n         assert_eq!(actual, expected.as_bytes());\n     }\n \n+    #[test]\n+    fn control_scan_covers_ascii_and_c1_boundaries() {\n+        for code in 0..=0x1f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert_eq!(has_terminal_controls(&ch.to_string()), code != 0x09, \"U+{code:04X}\");\n+        }\n+        assert!(!has_terminal_controls(\" ~\"));\n+        assert!(has_terminal_controls(\"\\u{7f}\"));\n+        for code in 0x80..=0x9f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert!(has_terminal_controls(&ch.to_string()), \"U+{code:04X}\");\n+        }\n+        // U+00A0 shares the C2 prefix: the conservative scan may use the\n+        // sanitizer, which must preserve this and other non-control Unicode.\n+        let mut output = String::new();\n+        strip_terminal_controls_append(\"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\", &mut output);\n+        assert_eq!(output, \"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\");\n+    }\n+\n     #[test]\n     fn direct_metadata_keeps_text_but_drops_terminal_controls() {\n         let input = concat!(\n",
+  "platform": "Darwin arm64, 18 logical cores; rustc 1.102.0-nightly (5b7b37aef 2026-11-08)",
+  "benchmark_files_sha256": {
+    "benches/bench.rs": "87a10fd98c4e46cdeb8576992592af0a781fe9259f2c09663528cfa310d1fa43",
+    "scrl/benches/bench.rs": "ef6a1dc3dec6b14be8162f1e2042027bae730ee1ac60eb4fed593ec9dd3bd5f7"
+  },
+  "predicate_experiment": {
+    "purpose": "Isolate scan costs on all fixture lines, outside shipping benchmark; this cannot establish the contribution to end-to-end rendering. The C2 prefix produces conservative false positives for non-control U+00A0..U+00BF.",
+    "source": "use std::{fs, hint::black_box, time::Instant};\nfn main() {\n let mut files: Vec<_> = fs::read_dir(\"fixtures\").unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|s| s == \"patch\")).collect(); files.sort();\n let inputs: Vec<String> = files.iter().map(|p| fs::read_to_string(p).unwrap()).collect();\n for round in 0..10 { let fast = round % 2 == 1; let now = Instant::now(); let mut count = 0usize;\n  for _ in 0..200 { for s in &inputs { for line in s.lines() { count += black_box(if fast { line.bytes().any(|b| (b < 32 && b != b'\\t') || b == 127 || b == 0xc2) } else { line.chars().any(|c| c.is_control() && c != '\\t') }) as usize; } } }\n  println!(\"{} {} {}\", if fast {\"bytes\"} else {\"chars\"}, now.elapsed().as_nanos(), count);\n }\n}\n",
+    "compile_command": "PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH TMPDIR=$PWD/.work/tmp RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 cpu-guard --cores 2 -- rustc -C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort .work/tmp/predicate.rs -o .work/tmp/predicate",
+    "run_command": "perf-gate-ready; PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH cpu-guard --cores 2 -- .work/tmp/predicate; perf-gate-ready -1",
+    "exits": [
+      0,
+      0,
+      0
+    ],
+    "output": "chars 43993792 105200\nbytes 32553958 105200\nchars 42690709 105200\nbytes 32984250 105200\nchars 42831167 105200\nbytes 31682250 105200\nchars 42884916 105200\nbytes 31440083 105200\nchars 42460958 105200\nbytes 32283458 105200\n",
+    "limitations": "200 repeated line scans, counts consumed with black_box; not a full-render profile; no attribution of full rendering time."
+  },
+  "focused_test": {
+    "command": "PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH TMPDIR=$PWD/.work/tmp RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_TARGET_DIR=$PWD/.work/final-target cpu-guard --cores 2 -- cargo test --release control_scan_covers_ascii_and_c1_boundaries",
+    "exit": 0,
+    "hand_fault": "Remove || byte == 0xc2; same command exits 101 at U+0080; source restored."
+  },
+  "benchmark": {
+    "setup": "Build both packages separately using command in pair script plus --no-run before measurement; baseline already had artifacts. Dist profile, production RUSTFLAGS and build-std, panic-abort-tests. Five interleaved base/candidate pairs for each package; rustybench CLI 0.4.0 and library 0.5.0. The script exits on any failed pre, run or immediate post gate.",
+    "script": "#!/bin/zsh\nset -u\nroot=\"$PWD\"\nfor package in diff-pretty scrl; do\n  for iteration in 1 2 3 4 5; do\n    for side in base candidate; do\n      if [ \"$side\" = base ]; then tree=\"$root/../ds-perf-base\"; else tree=\"$root\"; fi\n      label=\"${package}-${iteration}-${side}\"\n      cd \"$tree\" || exit 1\n      uptime > \"$root/.work/tmp/${label}.load\"\n      sysctl -n hw.ncpu >> \"$root/.work/tmp/${label}.load\"\n      perf-gate-ready > \"$root/.work/tmp/${label}.pre\" 2>&1\n      pre=$?\n      if [ \"$pre\" -ne 0 ]; then printf '%s pre=%s\\n' \"$label\" \"$pre\"; exit 50; fi\n      env CARGO_TARGET_DIR=\"$PWD/.work/perf-abort-target\" TMPDIR=\"$PWD/.work/tmp\" RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=clang RUSTFLAGS='-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -Clink-arg=-Wl,-dead_strip_dylibs' cpu-guard --cores 2 -- rustybench baseline --baseline \"$root/.work/tmp/${label}.json\" --warmup 1 --runs 1 --sample-count 5 --sample-size 10 -- cargo bench -p \"$package\" --bench bench --profile dist -Z build-std=std -Z build-std-features= -Z panic-abort-tests --target aarch64-apple-darwin > \"$root/.work/tmp/${label}.log\" 2>&1\n      run=$?\n      perf-gate-ready -1 > \"$root/.work/tmp/${label}.post\" 2>&1\n      post=$?\n      printf '%s pre=%s run=%s post=%s\\n' \"$label\" \"$pre\" \"$run\" \"$post\"\n      if [ \"$post\" -ne 0 ]; then exit 51; fi\n      if [ \"$run\" -ne 0 ]; then exit 52; fi\n    done\n  done\ndone\n",
+    "invocation": "PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH zsh .work/tmp/run-pairs.sh",
+    "outer_exit": 0,
+    "status": "diff-pretty-1-base pre=0 run=0 post=0\ndiff-pretty-1-candidate pre=0 run=0 post=0\ndiff-pretty-2-base pre=0 run=0 post=0\ndiff-pretty-2-candidate pre=0 run=0 post=0\ndiff-pretty-3-base pre=0 run=0 post=0\ndiff-pretty-3-candidate pre=0 run=0 post=0\ndiff-pretty-4-base pre=0 run=0 post=0\ndiff-pretty-4-candidate pre=0 run=0 post=0\ndiff-pretty-5-base pre=0 run=0 post=0\ndiff-pretty-5-candidate pre=0 run=0 post=0\nscrl-1-base pre=0 run=0 post=0\nscrl-1-candidate pre=0 run=0 post=0\nscrl-2-base pre=0 run=0 post=0\nscrl-2-candidate pre=0 run=0 post=0\nscrl-3-base pre=0 run=0 post=0\nscrl-3-candidate pre=0 run=0 post=0\nscrl-4-base pre=0 run=0 post=0\nscrl-4-candidate pre=0 run=0 post=0\nscrl-5-base pre=0 run=0 post=0\nscrl-5-candidate pre=0 run=0 post=0\n",
+    "rule": "Candidate median regression requires difference greater than both 2% of base median and the larger within-side range. Five median-of-five-sample run medians per side.",
+    "rows": [
+      {
+        "package": "diff-pretty",
+        "name": "bench::pager_viewport_show_010",
+        "base": {
+          "run_medians_ns": [
+            3683,
+            3837,
+            3941,
+            3704,
+            4104
+          ],
+          "median_ns": 3837,
+          "min_ns": 3683,
+          "max_ns": 4104,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            3708,
+            3608,
+            3800,
+            3516,
+            7158
+          ],
+          "median_ns": 3708,
+          "min_ns": 3516,
+          "max_ns": 7158,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_document_show_010",
+        "base": {
+          "run_medians_ns": [
+            65371,
+            64304,
+            65241,
+            68218,
+            69625
+          ],
+          "median_ns": 65371,
+          "min_ns": 64304,
+          "max_ns": 69625,
+          "alloc_counts": [
+            65
+          ],
+          "alloc_bytes": [
+            62104
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            61716,
+            63766,
+            65388,
+            66696,
+            68756
+          ],
+          "median_ns": 65388,
+          "min_ns": 61716,
+          "max_ns": 68756,
+          "alloc_counts": [
+            65
+          ],
+          "alloc_bytes": [
+            62104
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_log_000",
+        "base": {
+          "run_medians_ns": [
+            363641,
+            342929,
+            344354,
+            403362,
+            390744
+          ],
+          "median_ns": 363641,
+          "min_ns": 342929,
+          "max_ns": 403362,
+          "alloc_counts": [
+            532
+          ],
+          "alloc_bytes": [
+            1049867
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            353400,
+            369583,
+            377458,
+            363712,
+            384037
+          ],
+          "median_ns": 369583,
+          "min_ns": 353400,
+          "max_ns": 384037,
+          "alloc_counts": [
+            532
+          ],
+          "alloc_bytes": [
+            1049867
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_log_000_color",
+        "base": {
+          "run_medians_ns": [
+            417079,
+            401700,
+            427666,
+            447136,
+            429386
+          ],
+          "median_ns": 427666,
+          "min_ns": 401700,
+          "max_ns": 447136,
+          "alloc_counts": [
+            535
+          ],
+          "alloc_bytes": [
+            1102088
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            394650,
+            448321,
+            393479,
+            407687,
+            436649
+          ],
+          "median_ns": 407687,
+          "min_ns": 393479,
+          "max_ns": 448321,
+          "alloc_counts": [
+            535
+          ],
+          "alloc_bytes": [
+            1102088
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_plain_unified",
+        "base": {
+          "run_medians_ns": [
+            1500,
+            1783,
+            1375,
+            1439,
+            1454
+          ],
+          "median_ns": 1454,
+          "min_ns": 1375,
+          "max_ns": 1783,
+          "alloc_counts": [
+            26
+          ],
+          "alloc_bytes": [
+            2743
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            1396,
+            1362,
+            1486,
+            1396,
+            1460
+          ],
+          "median_ns": 1396,
+          "min_ns": 1362,
+          "max_ns": 1486,
+          "alloc_counts": [
+            26
+          ],
+          "alloc_bytes": [
+            2743
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_reader_document_synthetic_git_log_10000",
+        "base": {
+          "run_medians_ns": [
+            10115237,
+            10784471,
+            10357137,
+            11068464,
+            10286074
+          ],
+          "median_ns": 10357137,
+          "min_ns": 10115237,
+          "max_ns": 11068464,
+          "alloc_counts": [
+            10008
+          ],
+          "alloc_bytes": [
+            705971
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            9866383,
+            10234708,
+            10372088,
+            10468491,
+            10588441
+          ],
+          "median_ns": 10372088,
+          "min_ns": 9866383,
+          "max_ns": 10588441,
+          "alloc_counts": [
+            10008
+          ],
+          "alloc_bytes": [
+            705971
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_reader_to_log_000",
+        "base": {
+          "run_medians_ns": [
+            354537,
+            367816,
+            378791,
+            395862,
+            378086
+          ],
+          "median_ns": 378086,
+          "min_ns": 354537,
+          "max_ns": 395862,
+          "alloc_counts": [
+            561
+          ],
+          "alloc_bytes": [
+            1086041
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            368358,
+            366821,
+            380548,
+            381329,
+            394746
+          ],
+          "median_ns": 380548,
+          "min_ns": 366821,
+          "max_ns": 394746,
+          "alloc_counts": [
+            561
+          ],
+          "alloc_bytes": [
+            1086041
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_corpus",
+        "base": {
+          "run_medians_ns": [
+            4867191,
+            4941558,
+            5311137,
+            5411914,
+            5197345
+          ],
+          "median_ns": 5197345,
+          "min_ns": 4867191,
+          "max_ns": 5411914,
+          "alloc_counts": [
+            6970
+          ],
+          "alloc_bytes": [
+            15174210
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            4988308,
+            5232708,
+            5095335,
+            5116262,
+            5402734
+          ],
+          "median_ns": 5116262,
+          "min_ns": 4988308,
+          "max_ns": 5402734,
+          "alloc_counts": [
+            6970
+          ],
+          "alloc_bytes": [
+            15174210
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_large",
+        "base": {
+          "run_medians_ns": [
+            1524879,
+            1568379,
+            1582033,
+            1665929,
+            1571833
+          ],
+          "median_ns": 1571833,
+          "min_ns": 1524879,
+          "max_ns": 1665929,
+          "alloc_counts": [
+            1542
+          ],
+          "alloc_bytes": [
+            5880164
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            1557079,
+            1563241,
+            1583869,
+            1549066,
+            1594078
+          ],
+          "median_ns": 1563241,
+          "min_ns": 1549066,
+          "max_ns": 1594078,
+          "alloc_counts": [
+            1542
+          ],
+          "alloc_bytes": [
+            5880164
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_metadata",
+        "base": {
+          "run_medians_ns": [
+            332662,
+            328441,
+            327658,
+            341444,
+            351276
+          ],
+          "median_ns": 332662,
+          "min_ns": 327658,
+          "max_ns": 351276,
+          "alloc_counts": [
+            955
+          ],
+          "alloc_bytes": [
+            772733
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            336029,
+            333079,
+            339776,
+            345950,
+            355530
+          ],
+          "median_ns": 339776,
+          "min_ns": 333079,
+          "max_ns": 355530,
+          "alloc_counts": [
+            955
+          ],
+          "alloc_bytes": [
+            772733
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_typical",
+        "base": {
+          "run_medians_ns": [
+            2808383,
+            2910237,
+            3054796,
+            2938845,
+            2962428
+          ],
+          "median_ns": 2938845,
+          "min_ns": 2808383,
+          "max_ns": 3054796,
+          "alloc_counts": [
+            4473
+          ],
+          "alloc_bytes": [
+            8521313
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            2928233,
+            2869033,
+            3007352,
+            3126816,
+            3119746
+          ],
+          "median_ns": 3007352,
+          "min_ns": 2869033,
+          "max_ns": 3126816,
+          "alloc_counts": [
+            4473
+          ],
+          "alloc_bytes": [
+            8521313
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::cached_search_redraw",
+        "base": {
+          "run_medians_ns": [
+            9975,
+            11196,
+            9179,
+            12016,
+            9791
+          ],
+          "median_ns": 9975,
+          "min_ns": 9179,
+          "max_ns": 12016,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            10212,
+            9537,
+            10550,
+            10291,
+            9912
+          ],
+          "median_ns": 10212,
+          "min_ns": 9537,
+          "max_ns": 10550,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::filtered_stream_and_redraw_500k",
+        "base": {
+          "run_medians_ns": [
+            2013627,
+            1889595,
+            2033254,
+            2024219,
+            1908216
+          ],
+          "median_ns": 2013627,
+          "min_ns": 1889595,
+          "max_ns": 2033254,
+          "alloc_counts": [
+            169
+          ],
+          "alloc_bytes": [
+            20130
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            1805616,
+            2023015,
+            1944700,
+            2212533,
+            1740528
+          ],
+          "median_ns": 1944700,
+          "min_ns": 1740528,
+          "max_ns": 2212533,
+          "alloc_counts": [
+            169
+          ],
+          "alloc_bytes": [
+            20130
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::filtered_stream_and_redraw_50k",
+        "base": {
+          "run_medians_ns": [
+            186016,
+            178472,
+            203025,
+            198112,
+            179742
+          ],
+          "median_ns": 186016,
+          "min_ns": 178472,
+          "max_ns": 203025,
+          "alloc_counts": [
+            52
+          ],
+          "alloc_bytes": [
+            13970
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            176000,
+            169757,
+            175108,
+            192437,
+            166995
+          ],
+          "median_ns": 175108,
+          "min_ns": 166995,
+          "max_ns": 192437,
+          "alloc_counts": [
+            52
+          ],
+          "alloc_bytes": [
+            13970
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::filtered_stream_and_redraw_5m",
+        "base": {
+          "run_medians_ns": [
+            20146421,
+            19880377,
+            18326146,
+            22036887,
+            20329726
+          ],
+          "median_ns": 20146421,
+          "min_ns": 18326146,
+          "max_ns": 22036887,
+          "alloc_counts": [
+            1335
+          ],
+          "alloc_bytes": [
+            82230
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            18396254,
+            19767831,
+            20476275,
+            22542662,
+            18054446
+          ],
+          "median_ns": 19767831,
+          "min_ns": 18054446,
+          "max_ns": 22542662,
+          "alloc_counts": [
+            1335
+          ],
+          "alloc_bytes": [
+            82230
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::initial_regex_search_late_match",
+        "base": {
+          "run_medians_ns": [
+            2921116,
+            2832328,
+            2818429,
+            2745338,
+            3107557
+          ],
+          "median_ns": 2832328,
+          "min_ns": 2745338,
+          "max_ns": 3107557,
+          "alloc_counts": [
+            105
+          ],
+          "alloc_bytes": [
+            2085525
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            2572200,
+            2683311,
+            2624833,
+            3453908,
+            2465679
+          ],
+          "median_ns": 2624833,
+          "min_ns": 2465679,
+          "max_ns": 3453908,
+          "alloc_counts": [
+            105
+          ],
+          "alloc_bytes": [
+            2085525
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::initial_search_late_match",
+        "base": {
+          "run_medians_ns": [
+            2984978,
+            2577684,
+            2716291,
+            2802385,
+            3075082
+          ],
+          "median_ns": 2802385,
+          "min_ns": 2577684,
+          "max_ns": 3075082,
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            2084795
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            2416454,
+            2815203,
+            2590937,
+            3406691,
+            2435962
+          ],
+          "median_ns": 2590937,
+          "min_ns": 2416454,
+          "max_ns": 3406691,
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            2084795
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::live_search_chunk_and_redraw",
+        "base": {
+          "run_medians_ns": [
+            1568170,
+            1178513,
+            1348204,
+            1504415,
+            1562069
+          ],
+          "median_ns": 1504415,
+          "min_ns": 1178513,
+          "max_ns": 1568170,
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            1054795
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            1280537,
+            1571549,
+            1238687,
+            1761625,
+            1207629
+          ],
+          "median_ns": 1280537,
+          "min_ns": 1207629,
+          "max_ns": 1761625,
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            1054795
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::session_redraw_without_movement",
+        "base": {
+          "run_medians_ns": [
+            13579,
+            13341,
+            13783,
+            13550,
+            11941
+          ],
+          "median_ns": 13550,
+          "min_ns": 11941,
+          "max_ns": 13783,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            11921,
+            12387,
+            12954,
+            13425,
+            15012
+          ],
+          "median_ns": 12954,
+          "min_ns": 11921,
+          "max_ns": 15012,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::viewport_redraw_horizontal_clip",
+        "base": {
+          "run_medians_ns": [
+            11583,
+            11829,
+            12079,
+            11429,
+            11204
+          ],
+          "median_ns": 11583,
+          "min_ns": 11204,
+          "max_ns": 12079,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            10754,
+            10979,
+            11412,
+            13596,
+            13208
+          ],
+          "median_ns": 11412,
+          "min_ns": 10754,
+          "max_ns": 13596,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::viewport_redraw_no_search",
+        "base": {
+          "run_medians_ns": [
+            13225,
+            13325,
+            12991,
+            14554,
+            11966
+          ],
+          "median_ns": 13225,
+          "min_ns": 11966,
+          "max_ns": 14554,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            11908,
+            11150,
+            12329,
+            13858,
+            16412
+          ],
+          "median_ns": 12329,
+          "min_ns": 11150,
+          "max_ns": 16412,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::viewport_redraw_styled",
+        "base": {
+          "run_medians_ns": [
+            9637,
+            10004,
+            9983,
+            10587,
+            8833
+          ],
+          "median_ns": 9983,
+          "min_ns": 8833,
+          "max_ns": 10587,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "run_medians_ns": [
+            8729,
+            8329,
+            9000,
+            10300,
+            9462
+          ],
+          "median_ns": 9000,
+          "min_ns": 8329,
+          "max_ns": 10300,
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "regression": false
+      }
+    ],
+    "result": "No row exceeds the regression bound; render_show_corpus is 5,197,345 ns vs 5,116,262 ns, difference -81,083 ns, smaller than the 544,723 ns larger range. This does not establish a reproducible end-to-end improvement, so the change was rejected.",
+    "pre_run_loads": {
+      "diff-pretty-1-base": "1:16  up 3 days, 16 hrs, 3 users, load averages: 5.72 3.25 2.74\n18",
+      "diff-pretty-1-candidate": "1:16  up 3 days, 16 hrs, 3 users, load averages: 5.58 3.26 2.75\n18",
+      "diff-pretty-2-base": "1:16  up 3 days, 16 hrs, 3 users, load averages: 5.21 3.22 2.74\n18",
+      "diff-pretty-2-candidate": "1:16  up 3 days, 16 hrs, 3 users, load averages: 5.21 3.22 2.74\n18",
+      "diff-pretty-3-base": "1:16  up 3 days, 16:01, 3 users, load averages: 5.12 3.24 2.75\n18",
+      "diff-pretty-3-candidate": "1:16  up 3 days, 16:01, 3 users, load averages: 5.03 3.25 2.75\n18",
+      "diff-pretty-4-base": "1:16  up 3 days, 16:01, 3 users, load averages: 5.03 3.25 2.75\n18",
+      "diff-pretty-4-candidate": "1:17  up 3 days, 16:01, 3 users, load averages: 4.78 3.23 2.75\n18",
+      "diff-pretty-5-base": "1:17  up 3 days, 16:01, 3 users, load averages: 4.64 3.22 2.75\n18",
+      "diff-pretty-5-candidate": "1:17  up 3 days, 16:01, 3 users, load averages: 4.43 3.20 2.75\n18",
+      "scrl-1-base": "1:17  up 3 days, 16:01, 3 users, load averages: 4.43 3.20 2.75\n18",
+      "scrl-1-candidate": "1:17  up 3 days, 16:01, 3 users, load averages: 4.63 3.27 2.77\n18",
+      "scrl-2-base": "1:17  up 3 days, 16:01, 3 users, load averages: 4.58 3.28 2.78\n18",
+      "scrl-2-candidate": "1:17  up 3 days, 16:01, 3 users, load averages: 4.54 3.29 2.78\n18",
+      "scrl-3-base": "1:17  up 3 days, 16:01, 3 users, load averages: 4.41 3.28 2.79\n18",
+      "scrl-3-candidate": "1:17  up 3 days, 16:01, 3 users, load averages: 4.30 3.28 2.79\n18",
+      "scrl-4-base": "1:17  up 3 days, 16:01, 3 users, load averages: 4.20 3.27 2.79\n18",
+      "scrl-4-candidate": "1:17  up 3 days, 16:01, 3 users, load averages: 4.26 3.30 2.80\n18",
+      "scrl-5-base": "1:17  up 3 days, 16:02, 3 users, load averages: 4.08 3.28 2.80\n18",
+      "scrl-5-candidate": "1:17  up 3 days, 16:02, 3 users, load averages: 4.08 3.28 2.80\n18"
+    },
+    "schema_check": "Each receipt schema 1, sample_count 5, sample_size 10, one measured run; 11 benchmark names per package, same names in all ten receipts."
+  },
+  "limitations": [
+    "The original accepted regression remains parked; this comparison does not reverse its verdict.",
+    "No full output corpus, production binary size, RSS, sanitizer mutation inventory, final workspace suite or lint/clippy was run for the rejected change.",
+    "No Linux measurements.",
+    "No symbol-attributed renderer profile; predicate experiment isolates a mechanism only."
+  ],
+  "lock_sha256": {
+    "base": "205e1dd6d5b4f07f7258bb9cc9fb02ede2c109c1205778dd8a6cc5f3c7fe3e61",
+    "candidate": "11fa85bf38485289c3efc7e6e406251179f8a4ba0e71130820e1d33ffb72d2c8"
+  }
+}
