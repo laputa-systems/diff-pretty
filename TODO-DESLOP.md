@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 9
+Next: 10
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -53,6 +53,10 @@ formats and dependencies are unchanged. The workspace is the affected consumer.
 - **Effort:** M
 
 
+
+
+
+
 ### DSLP-6 · P3 · Guard CLI success and failure contracts at the process boundary
 
 - **Area:** CLI · tests
@@ -61,8 +65,6 @@ formats and dependencies are unchanged. The workspace is the affected consumer.
 - **Recommendation:** Add bounded process-level scenarios for valid direct output and representative invalid input and I/O errors for both commands, with literal output and exit assertions. Include src/main.rs and scrl/src/main.rs in the Tests step's critical mutation scope.
 - **Fix with:** test-audit
 - **Effort:** M
-
-
 
 
 ### DSLP-8 · P3 · Investigate unreachable legacy terminal runner branch

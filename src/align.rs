@@ -104,14 +104,14 @@ impl<'a> Alignment<'a> {
     fn fill(&mut self) {
         for i in 1..self.dim[1] {
             self.table[i] = Cell {
-                parent: 0,
+                parent: i - 1,
                 operation: Deletion,
                 cost: i * DELETION_COST + INITIAL_MISMATCH_PENALTY,
             };
         }
         for j in 1..self.dim[0] {
             self.table[j * self.dim[1]] = Cell {
-                parent: 0,
+                parent: (j - 1) * self.dim[1],
                 operation: Insertion,
                 cost: j * INSERTION_COST + INITIAL_MISMATCH_PENALTY,
             };
@@ -164,6 +164,9 @@ impl<'a> Alignment<'a> {
     pub fn coalesced_operations_into(&self, encoded: &mut Vec<(Operation, usize)>) {
         encoded.clear();
         let mut p = self.index(self.x.len(), self.y.len());
+        if p == 0 {
+            return;
+        }
         let mut run: usize = 0;
         let mut curr_op = Operation::NoOp;
         loop {
