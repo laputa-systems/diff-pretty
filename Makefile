@@ -68,7 +68,7 @@ bench-diff:
 
 # BASE must name the target branch or its merge base; SHARD is one CI partition.
 .PHONY: mutants-diff mutants-gate-test
-mutants-diff: export BASE SHARD
+export BASE SHARD
 mutants-diff:
 	@test -n "$$BASE" && test -n "$$SHARD" || { echo 'BASE and SHARD are required' >&2; exit 2; }
 	python3 -B scripts/mutants_gate.py "$$BASE" --shard "$$SHARD"
