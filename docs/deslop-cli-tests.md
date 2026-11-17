@@ -182,10 +182,22 @@ draft stays unmerged.
 
 ## Current workspace branch coverage
 
-At runtime revision `de831c1264a464784e484267f3604dea04667ce9`, macOS ARM64,
+The integrated warm release suite meets the test-cost allowance. Baseline
+`49a1c97d1f60932c3d860318672ecdcc545a0986` takes 1.18 s and current
+`ff22d282e99f1836e2ad263bf64b9c3edbfce57c` takes 1.17 s. Each records
+0.19 s user and 0.23 s system CPU. These single observations establish no
+speedup. Both pre/test/immediate-post triples exit 0. On each side, build
+and warm outside measurement with `cargo test --workspace --release --no-run`
+and `make test`, then run `perf-gate-ready`, `/usr/bin/time -p cpu-guard
+--cores 2 -- make test`, and immediately `perf-gate-ready -1`. Use
+`RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`, `RUST_TEST_THREADS=2`,
+repo-owned `TMPDIR` and a separate absolute `CARGO_TARGET_DIR` on each side.
+This measures suite cost, not renderer runtime acceptance.
+
+At integrated revision `ff22d282e99f1836e2ad263bf64b9c3edbfce57c`, macOS ARM64,
 the pinned nightly and cargo-llvm-cov 0.9.1, the complete workspace coverage
-run passes all 70 tests with no ignored cases. Default features and debug
-instrumentation cover 3,246/4,308 lines and 593/924 branches across the 13
+run passes 88 executable tests and one doctest with no ignored cases. Default features and debug
+instrumentation cover 3,681/4,529 lines and 648/930 branches across the 13
 executable first-party source files. The historical before result was
 3,025/4,182 lines and 542/918 branches; changed denominators prevent treating
 the difference as a fixed-scope detection score. Coverage is a report, not
@@ -193,13 +205,14 @@ an acceptance threshold or proof that an assertion detects a defect.
 
 The report leaves these decisions open:
 
-- `src/source.rs`: `emit_reader` and `DiffSource::produce` are unexercised.
-  Redirected CLI tests take main's direct rendering branch, so they do not
-  witness this public adapter or the live pager. Add an owned PTY scenario
-  and an adapter-level output/error oracle; do not infer a pass from the
-  renderer tests.
+- The previously unexercised `src/source.rs` adapter now has owned PTY and
+  direct output/error witnesses. Its complete seven-mutant selection is
+  caught, as recorded below. This resolves that earlier gap without claiming
+  every live terminal decision is exercised.
 - `scrl/src/session.rs` and `scrl/src/terminal.rs`: live session, event and
-  terminal lifecycle paths remain partly unrun. DSLP-8's retained-source
+  terminal lifecycle paths remain partly unrun. Navigation's 44 selected
+  mutations and draw's 14 are classified, with [draw evidence](deslop-session-draw.md).
+  DSLP-8's retained-source
   runner is a liveness investigation, not permission to label these paths
   unreachable or remove them.
 - `src/render.rs`: metadata/hunk rendering decisions outside the qualified
