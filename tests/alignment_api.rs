@@ -33,7 +33,6 @@ fn alignment_tokens_are_readable_after_reset() {
     assert!(!operations.is_empty());
 }
 
-// Enumerate complete paths rather than reconstructing the production table.
 fn minimum_cost(x: &[&str], y: &[&str], after_match: bool) -> usize {
     if x.is_empty() && y.is_empty() { return 0; }
     let mut best = usize::MAX;

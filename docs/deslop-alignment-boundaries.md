@@ -4,7 +4,7 @@ Status: locally accepted. Empty and one-sided public inputs now return complete 
 
 ## Change and consumers
 
-Admission revision: `35eae8f07c9c571e153a6bd026751fea5ebf1dd7`. Runtime fix: `f1f2a95`. Test commits: `8996cbb` and `250b572`. Comparison baseline: `6ba0962f002cd0f03ad50ede43216bf581a8c228`. Candidate `src/align.rs` SHA-256: `fcf5732838826cf7fc13740f4977a5937591a92b6437d721aba57ce539402695`. Candidate test SHA-256: `40f4190680f080dc101da55973fcfd31dc8afd2c9dc548c9706ffdffcc3806a8`.
+Admission revision: `35eae8f07c9c571e153a6bd026751fea5ebf1dd7`. Runtime fix: `f1f2a95`. Test commits: `8996cbb` and `250b572`. Comparison baseline: `6ba0962f002cd0f03ad50ede43216bf581a8c228`. Candidate `src/align.rs` SHA-256: `fcf5732838826cf7fc13740f4977a5937591a92b6437d721aba57ce539402695`. Final test SHA-256: `065dfa49e520716926b4395184940dd5614dda6ef25f97dfcf1838d1724f096a`; the parent removed one explanatory comment after verification without changing executable statements.
 
 Boundary cells now point to the preceding cell, and an empty backtrace stops before the origin. Empty public inputs return no runs. One-sided inputs return a run containing every token. Costs and candidate ordering are unchanged. `src/edits.rs:21-23` prepends an empty sentinel for first-party tokenization. `src/edits.rs:129` consumes the runs, and `src/edits.rs:295` and `:416` construct alignments for edit inference. External consumers are unknown. Cargo metadata identified both workspace manifests under this candidate checkout.
 
