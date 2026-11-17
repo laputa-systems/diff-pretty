@@ -76,6 +76,14 @@ mod tests {
     }
 
     #[test]
+    fn public_nonpaging_reader_preserves_empty_input_and_read_error() {
+        emit_reader(Cursor::new(Vec::<u8>::new()), PagingMode::Never).unwrap();
+        let error = emit_reader(BufReader::new(Broken), PagingMode::Never).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(error.to_string(), "read sentinel");
+    }
+
+    #[test]
     fn read_and_callback_errors_propagate_and_stop() {
         let mut calls = 0;
         let error = DiffSource { input: BufReader::new(Broken) }.produce(&mut |_| {
