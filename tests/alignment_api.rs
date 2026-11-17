@@ -76,6 +76,8 @@ fn scenarios() {
     alignment_tokens_are_readable_after_reset();
     for (x, y, expected) in [
         (vec!["a"], vec!["b"], vec![(Operation::Deletion, 1), (Operation::Insertion, 1)]),
+        (vec!["a"], vec!["b", "b"], vec![(Operation::Deletion, 1), (Operation::Insertion, 2)]),
+        (vec!["a"], vec!["b", "b", "b"], vec![(Operation::Deletion, 1), (Operation::Insertion, 3)]),
         (vec!["a", "a"], vec!["a"], vec![(Operation::NoOp, 1), (Operation::Deletion, 1)]),
         (vec!["a"], vec!["a", "a"], vec![(Operation::NoOp, 1), (Operation::Insertion, 1)]),
     ] {
