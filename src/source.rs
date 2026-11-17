@@ -13,9 +13,7 @@ pub fn emit_reader<R: BufRead + Send + 'static>(input: R, mode: PagingMode) -> i
     if !should_use_pager(mode) {
         let stdout = io::stdout();
         let mut output = stdout.lock();
-        crate::render::render_reader_to(input, &mut output)?;
-        output.flush()?;
-        return Ok(());
+        return render_and_flush(input, &mut output);
     }
     let options = RunOptions {
         paging: mode,
@@ -28,6 +26,11 @@ pub fn emit_reader<R: BufRead + Send + 'static>(input: R, mode: PagingMode) -> i
         },
     };
     scrl::run_source(DiffSource { input }, options).map(|_: ExitReason| ())
+}
+
+fn render_and_flush(input: impl BufRead, output: &mut impl Write) -> io::Result<()> {
+    crate::render::render_reader_to(input, output)?;
+    output.flush()
 }
 
 struct DiffSource<R> {
