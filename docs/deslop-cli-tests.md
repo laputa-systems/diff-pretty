@@ -284,3 +284,51 @@ release workspace suite, lint and warnings-denied workspace clippy all pass
 with separate `.work/target-controls-final`: 79 executable cases and one
 doctest, no ignored cases. Latest-head Linux CI, refreshed coverage, remaining
 exported APIs and the quiet-host gates remain open.
+
+### scrl streaming sources
+
+At base `dca96f1758148ae6939b0ca45ce8b14d7d6b1553`, the candidate
+`scrl/tests/source_contracts.rs` (SHA-256
+`505a06d5215899d581859f117f60edeaa0f935e08269c08e1cb40f5ff6a2fa1e`)
+exercises the public source types in a five-second owned child. The child
+witnesses startup and completion and checks joined literal output, split
+UTF-8, invalid/truncated prefixes, read and callback errors, lazy owned paths,
+ordered operands, a missing later file and no operands. Each operand remains an
+independent UTF-8 stream. The existing production source SHA-256 is
+`c97817f574028e6b704f83516ae92fbb9e6c727cc9e765928b7b7aa826169ed3`.
+A hand fault stopping after the first file made this test fail with `oneé`
+instead of `oneé二end`; the original source was restored.
+
+On macOS arm64 with cargo-mutants 27.1.0, the complete generated source
+selection initially contained ten mutants: seven caught, two missed, one unviable, and
+no timeouts; the mutation command exited 2. The receipt run repeated the
+selection to capture the outer exit after the first receipt omitted it. The unviable `path` replacement cannot compile because `Path`
+has no `Default` and is unsized. The missed `> -> >=` changes at lines 44
+and 66 introduce an empty callback when `valid_up_to` is zero. Empty writes
+leave direct output unchanged; a custom callback can observe or reject them,
+so these are not universally equivalent. Parent completion adds a consumer
+that rejects empty callbacks while joining fragmented valid input. Both
+survivors now fail that assertion. A fresh complete run with the same ten
+identities exits 0: nine caught, one unviable, zero missed or timed out;
+outer exit is saved in `.work/tmp/source-parent.exit`. Its output directory
+is `.work/source-parent`. Chunk boundaries are not
+specified by this suite. No exclusions were added. This is not coverage or
+performance evidence. The earlier incomplete workspace mutation result and
+DSLP-4 remain open.
+
+The mutation baseline actually ran both `source_contracts` tests. Under the
+shared atomic `mutation.lock`, with `PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`,
+`TMPDIR=$PWD/.work/tmp`, `RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`,
+`RUST_TEST_THREADS=1`, and a separate mutation `CARGO_TARGET_DIR`, the recipe is:
+
+```sh
+timeout -k 5 1200 cpu-guard --cores 2 -- cargo mutants --in-place --no-config --skip-calls-defaults=false -f scrl/src/source.rs -p scrl --test-package scrl --timeout 60 --build-timeout 300 --output .work/tmp/scrl-source-mutation-receipt -- --test source_contracts --offline
+```
+
+The final ordinary target was separate: `make test`, `make lint`, and
+`cargo clippy --workspace --all-targets --all-features -- --deny warnings`
+all passed with the same guarded environment. The workspace run included the
+`diff-pretty` consumer and one doctest; no tests were ignored. This receipt is
+for macOS; Linux-specific behavior and quiet-host performance remain unverified.
+The parent final suite has 81 executable cases and one doctest, with zero
+ignored cases. The source production hash above is unchanged.

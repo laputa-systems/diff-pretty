@@ -5,6 +5,12 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+Streaming-source completion: the complete ten-identity selection now has nine
+caught and one unviable, with no misses, timeouts or exclusions. The two
+initial empty-callback survivors fail the new rejecting consumer. Bounded
+semantic child assertions cover UTF-8, ordered/lazy files and error priority;
+full workspace tests, lint and clippy pass. Broader coverage and gates stay open.
+
 Pager-entry and source-adapter completion: four real PTY cases and literal
 stream/error oracles pass. The complete current adapter inventory has seven
 caught, no other outcomes or exclusions, including the private production
@@ -128,4 +134,3 @@ formats and dependencies are unchanged. The workspace is the affected consumer.
 - **Recommendation:** Trace all callers and supported feature and platform configurations; if no caller reaches the branch, remove it and its exclusively used helpers while preserving the public runner and testing its consumers.
 - **Fix with:** dead-code-archaeology
 - **Effort:** S
-
