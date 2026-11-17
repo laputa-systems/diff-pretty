@@ -974,5 +974,709 @@
   "lock_sha256": {
     "base": "205e1dd6d5b4f07f7258bb9cc9fb02ede2c109c1205778dd8a6cc5f3c7fe3e61",
     "candidate": "11fa85bf38485289c3efc7e6e406251179f8a4ba0e71130820e1d33ffb72d2c8"
+  },
+  "same_scope_correction": {
+    "verdict": "rejected; no attributable end-to-end improvement beyond spread",
+    "source_revisions": {
+      "base": "49a1c97d1f60932c3d860318672ecdcc545a0986",
+      "current_tree_head": "31a1831e5af59353b41dd4d63ffedf679a5514b4",
+      "current_production_revision": "dca96f1758148ae6939b0ca45ce8b14d7d6b1553",
+      "optimized_parent": "5366b1ad72cfacdcb559e9f78578503df81793a6"
+    },
+    "source_hashes": {
+      "base": "a7f91a904aeb2b27169aa4cd678f0bcd595ac099c776afe24f1862059de83765",
+      "current": "2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b",
+      "optimized": "17d71c876efbcd8b4c1581ed19d797c25b39d86321c2b210b801006d21236bdd"
+    },
+    "patch": "diff --git a/src/render.rs b/src/render.rs\nindex 187d7f8..fd99dc8 100644\n--- a/src/render.rs\n+++ b/src/render.rs\n@@ -1116,7 +1116,9 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {\n }\n \n fn has_terminal_controls(line: &str) -> bool {\n-    line.chars().any(|character| character.is_control() && character != '\\t')\n+    line.bytes().fold(false, |found, byte| {\n+        found | ((byte < 0x20) & (byte != b'\\t')) | (byte == 0x7f) | (byte == 0xc2)\n+    })\n }\n \n /// Remove terminal control sequences and bare controls from parser input,\n@@ -1475,6 +1477,25 @@ mod tests {\n         assert_eq!(actual, expected.as_bytes());\n     }\n \n+    #[test]\n+    fn control_scan_covers_ascii_and_c1_boundaries() {\n+        for code in 0..=0x1f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert_eq!(has_terminal_controls(&ch.to_string()), code != 0x09, \"U+{code:04X}\");\n+        }\n+        assert!(!has_terminal_controls(\" ~\"));\n+        assert!(has_terminal_controls(\"\\u{7f}\"));\n+        for code in 0x80..=0x9f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert!(has_terminal_controls(&ch.to_string()), \"U+{code:04X}\");\n+        }\n+        // U+00A0 shares the C2 prefix: the conservative scan may use the\n+        // sanitizer, which must preserve this and other non-control Unicode.\n+        let mut output = String::new();\n+        strip_terminal_controls_append(\"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\", &mut output);\n+        assert_eq!(output, \"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\");\n+    }\n+\n     #[test]\n     fn direct_metadata_keeps_text_but_drops_terminal_controls() {\n         let input = concat!(\n",
+    "patch_sha256": "2a3e713681174597f1b9b44293f58f6641252d36c081ce24873d6b37d132abcc",
+    "assembly_experiment": {
+      "source": "#[no_mangle]\npub fn scan(line: &str) -> bool {\n    line.bytes().fold(false, |found, byte| {\n        found | ((byte < 0x20) & (byte != b'\\t')) | (byte == 0x7f) | (byte == 0xc2)\n    })\n}\n",
+      "command": "PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH TMPDIR=$PWD/.work/tmp RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cpu-guard --cores 2 -- rustc --crate-type lib -C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort --emit=asm .work/tmp/fold-asm.rs -o .work/tmp/fold-asm.s",
+      "exit": 0,
+      "assembly": "\t.build_version macos, 11, 0\n\t.section\t__TEXT,__text,regular,pure_instructions\n\t.globl\t_scan\n\t.p2align\t2\n_scan:\n\t.cfi_startproc\n\tmov\tw8, #0\n\tcbz\tx1, LBB0_3\n\tmov\tw9, #127\n\tmov\tw10, #194\nLBB0_2:\n\tldrb\tw11, [x0], #1\n\tcmp\tw11, #32\n\tccmp\tw11, #9, #4, lo\n\tccmp\tw11, w9, #4, eq\n\tccmp\tw11, w10, #4, ne\n\tcset\tw11, eq\n\torr\tw8, w8, w11\n\tsubs\tx1, x1, #1\n\tb.ne\tLBB0_2\nLBB0_3:\n\tand\tw0, w8, #0x1\n\tret\n\t.cfi_endproc\n\n.subsections_via_symbols\n",
+      "observation": "Scalar byte load, conditional compares, and OR; no vector instructions in isolated function. This is not a profile or a claim about inlined production code."
+    },
+    "test": {
+      "command": "PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH TMPDIR=$PWD/.work/tmp RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_TARGET_DIR=$PWD/.work/final-target cpu-guard --cores 2 -- cargo test --release control_scan_covers_ascii_and_c1_boundaries",
+      "exit": 0,
+      "hand_fault": "Removed | (byte == 0xc2); command exited 101 at U+0080; source restored before timing."
+    },
+    "measurement": {
+      "build_script": "#!/bin/zsh\nset -u\nroot=\"$PWD\"\nfor side in base current optimized; do\n  case \"$side\" in base) tree=\"$root/../ds-perf-base\";; current) tree=\"$root/../ds-perf\";; optimized) tree=\"$root\";; esac\n  cd \"$tree\" || exit 1\n  mkdir -p .work/tmp\n  env PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH CARGO_TARGET_DIR=\"$PWD/.work/perf-abort-target\" TMPDIR=\"$PWD/.work/tmp\" RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=clang RUSTFLAGS='-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -Clink-arg=-Wl,-dead_strip_dylibs' cpu-guard --cores 2 -- cargo bench -p diff-pretty --bench bench --profile dist -Z build-std=std -Z build-std-features= -Z panic-abort-tests --target aarch64-apple-darwin --no-run > \"$root/.work/tmp/fold-build-${side}.log\" 2>&1\n  rc=$?; printf '%s build=%s\\n' \"$side\" \"$rc\"; [ \"$rc\" -eq 0 ] || exit \"$rc\"\ndone\n",
+      "build_command": "zsh .work/tmp/build-three.sh",
+      "build_exits": {
+        "base": 0,
+        "current": 0,
+        "optimized": 0
+      },
+      "script": "#!/bin/zsh\nset -u\nroot=\"$PWD\"\nfor iteration in 1 2 3 4 5; do\n  case \"$iteration\" in\n    1|4) sides=(base current optimized);;\n    2|5) sides=(current optimized base);;\n    3) sides=(optimized base current);;\n  esac\n  for side in \"${sides[@]}\"; do\n    case \"$side\" in base) tree=\"$root/../ds-perf-base\";; current) tree=\"$root/../ds-perf\";; optimized) tree=\"$root\";; esac\n    label=\"three-${iteration}-${side}\"\n    cd \"$tree\" || exit 1\n    uptime > \"$root/.work/tmp/${label}.load\"\n    sysctl -n hw.ncpu >> \"$root/.work/tmp/${label}.load\"\n    perf-gate-ready > \"$root/.work/tmp/${label}.pre\" 2>&1\n    pre=$?; if [ \"$pre\" -ne 0 ]; then printf '%s pre=%s\\n' \"$label\" \"$pre\"; exit 50; fi\n    env PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH CARGO_TARGET_DIR=\"$PWD/.work/perf-abort-target\" TMPDIR=\"$PWD/.work/tmp\" RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=clang RUSTFLAGS='-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -Clink-arg=-Wl,-dead_strip_dylibs' cpu-guard --cores 2 -- rustybench baseline --baseline \"$root/.work/tmp/${label}.json\" --warmup 1 --runs 1 --sample-count 15 --sample-size 20 -- cargo bench -p diff-pretty --bench bench --profile dist -Z build-std=std -Z build-std-features= -Z panic-abort-tests --target aarch64-apple-darwin > \"$root/.work/tmp/${label}.log\" 2>&1\n    run=$?\n    perf-gate-ready -1 > \"$root/.work/tmp/${label}.post\" 2>&1\n    post=$?\n    printf '%s pre=%s run=%s post=%s\\n' \"$label\" \"$pre\" \"$run\" \"$post\"\n    if [ \"$post\" -ne 0 ]; then exit 51; fi\n    if [ \"$run\" -ne 0 ]; then exit 52; fi\n  done\ndone\n",
+      "command": "zsh .work/tmp/three-pairs.sh",
+      "exit": 0,
+      "status": "three-1-base pre=0 run=0 post=0\nthree-1-current pre=0 run=0 post=0\nthree-1-optimized pre=0 run=0 post=0\nthree-2-current pre=0 run=0 post=0\nthree-2-optimized pre=0 run=0 post=0\nthree-2-base pre=0 run=0 post=0\nthree-3-optimized pre=0 run=0 post=0\nthree-3-base pre=0 run=0 post=0\nthree-3-current pre=0 run=0 post=0\nthree-4-base pre=0 run=0 post=0\nthree-4-current pre=0 run=0 post=0\nthree-4-optimized pre=0 run=0 post=0\nthree-5-current pre=0 run=0 post=0\nthree-5-optimized pre=0 run=0 post=0\nthree-5-base pre=0 run=0 post=0\n",
+      "pre_run_loads": {
+        "1-base": "1:24  up 3 days, 16:08, 3 users, load averages: 2.25 2.67 2.67\n18",
+        "1-current": "1:24  up 3 days, 16:08, 3 users, load averages: 2.42 2.69 2.67\n18",
+        "1-optimized": "1:25  up 3 days, 16:09, 3 users, load averages: 3.16 2.83 2.73\n18",
+        "2-base": "1:25  up 3 days, 16:09, 3 users, load averages: 3.34 2.93 2.76\n18",
+        "2-current": "1:25  up 3 days, 16:09, 3 users, load averages: 3.53 2.92 2.76\n18",
+        "2-optimized": "1:25  up 3 days, 16:09, 3 users, load averages: 3.59 2.96 2.77\n18",
+        "3-base": "1:26  up 3 days, 16:10, 3 users, load averages: 3.38 2.98 2.79\n18",
+        "3-current": "1:26  up 3 days, 16:10, 3 users, load averages: 3.51 3.03 2.81\n18",
+        "3-optimized": "1:25  up 3 days, 16:10, 3 users, load averages: 3.38 2.96 2.78\n18",
+        "4-base": "1:26  up 3 days, 16:10, 3 users, load averages: 3.33 3.01 2.81\n18",
+        "4-current": "1:26  up 3 days, 16:11, 3 users, load averages: 3.39 3.04 2.82\n18",
+        "4-optimized": "1:27  up 3 days, 16:11, 3 users, load averages: 3.08 2.99 2.81\n18",
+        "5-base": "1:27  up 3 days, 16:12, 3 users, load averages: 3.24 3.02 2.83\n18",
+        "5-current": "1:27  up 3 days, 16:11, 3 users, load averages: 2.92 2.96 2.80\n18",
+        "5-optimized": "1:27  up 3 days, 16:11, 3 users, load averages: 2.85 2.94 2.79\n18"
+      },
+      "configuration": "15 samples of 20 operations, one warmup and one measured run, five rotated runs per side; previous comparison used 5 samples of 10 operations. Both use shipping dist flags, same fixture workloads, rustybench CLI 0.4.0 and library 0.5.0. All 15 receipts schema 1 with same 11 names.",
+      "rows": [
+        {
+          "name": "bench::pager_viewport_show_010",
+          "base": {
+            "run_medians_ns": [
+              3500,
+              3558,
+              4089,
+              3562,
+              3683
+            ],
+            "median_ns": 3562,
+            "min_ns": 3500,
+            "max_ns": 4089,
+            "alloc_counts": [
+              1
+            ],
+            "alloc_bytes": [
+              120
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              3508,
+              3660,
+              3739,
+              3666,
+              3537
+            ],
+            "median_ns": 3660,
+            "min_ns": 3508,
+            "max_ns": 3739,
+            "alloc_counts": [
+              1
+            ],
+            "alloc_bytes": [
+              120
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              3648,
+              3529,
+              3627,
+              3621,
+              3745
+            ],
+            "median_ns": 3627,
+            "min_ns": 3529,
+            "max_ns": 3745,
+            "alloc_counts": [
+              1
+            ],
+            "alloc_bytes": [
+              120
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_document_show_010",
+          "base": {
+            "run_medians_ns": [
+              65225,
+              66505,
+              64895,
+              62489,
+              64277
+            ],
+            "median_ns": 64895,
+            "min_ns": 62489,
+            "max_ns": 66505,
+            "alloc_counts": [
+              65
+            ],
+            "alloc_bytes": [
+              62104
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              64073,
+              64135,
+              62646,
+              66055,
+              62477
+            ],
+            "median_ns": 64073,
+            "min_ns": 62477,
+            "max_ns": 66055,
+            "alloc_counts": [
+              65
+            ],
+            "alloc_bytes": [
+              62104
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              62162,
+              62679,
+              63329,
+              63666,
+              62530
+            ],
+            "median_ns": 62679,
+            "min_ns": 62162,
+            "max_ns": 63666,
+            "alloc_counts": [
+              65
+            ],
+            "alloc_bytes": [
+              62104
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_log_000",
+          "base": {
+            "run_medians_ns": [
+              347029,
+              344937,
+              377646,
+              343733,
+              341639
+            ],
+            "median_ns": 344937,
+            "min_ns": 341639,
+            "max_ns": 377646,
+            "alloc_counts": [
+              532
+            ],
+            "alloc_bytes": [
+              1049867
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              349760,
+              351989,
+              394685,
+              351024,
+              360246
+            ],
+            "median_ns": 351989,
+            "min_ns": 349760,
+            "max_ns": 394685,
+            "alloc_counts": [
+              532
+            ],
+            "alloc_bytes": [
+              1049867
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              339610,
+              339786,
+              344691,
+              338289,
+              350671
+            ],
+            "median_ns": 339786,
+            "min_ns": 338289,
+            "max_ns": 350671,
+            "alloc_counts": [
+              532
+            ],
+            "alloc_bytes": [
+              1049867
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_log_000_color",
+          "base": {
+            "run_medians_ns": [
+              403589,
+              411083,
+              411764,
+              400139,
+              400902
+            ],
+            "median_ns": 403589,
+            "min_ns": 400139,
+            "max_ns": 411764,
+            "alloc_counts": [
+              535
+            ],
+            "alloc_bytes": [
+              1102088
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              391804,
+              390983,
+              436875,
+              394494,
+              404639
+            ],
+            "median_ns": 394494,
+            "min_ns": 390983,
+            "max_ns": 436875,
+            "alloc_counts": [
+              535
+            ],
+            "alloc_bytes": [
+              1102088
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              395677,
+              386800,
+              396400,
+              385448,
+              386690
+            ],
+            "median_ns": 386800,
+            "min_ns": 385448,
+            "max_ns": 396400,
+            "alloc_counts": [
+              535
+            ],
+            "alloc_bytes": [
+              1102088
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_plain_unified",
+          "base": {
+            "run_medians_ns": [
+              1177,
+              1287,
+              1595,
+              1206,
+              1296
+            ],
+            "median_ns": 1287,
+            "min_ns": 1177,
+            "max_ns": 1595,
+            "alloc_counts": [
+              26
+            ],
+            "alloc_bytes": [
+              2743
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              1266,
+              1346,
+              1285,
+              1264,
+              1291
+            ],
+            "median_ns": 1285,
+            "min_ns": 1264,
+            "max_ns": 1346,
+            "alloc_counts": [
+              26
+            ],
+            "alloc_bytes": [
+              2743
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              1214,
+              1211,
+              1204,
+              1204,
+              1251
+            ],
+            "median_ns": 1211,
+            "min_ns": 1204,
+            "max_ns": 1251,
+            "alloc_counts": [
+              26
+            ],
+            "alloc_bytes": [
+              2743
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_reader_document_synthetic_git_log_10000",
+          "base": {
+            "run_medians_ns": [
+              9838002,
+              10836997,
+              10485643,
+              10548556,
+              10122464
+            ],
+            "median_ns": 10485643,
+            "min_ns": 9838002,
+            "max_ns": 10836997,
+            "alloc_counts": [
+              10008
+            ],
+            "alloc_bytes": [
+              705971
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              9685650,
+              9716956,
+              10623931,
+              9867627,
+              9788073
+            ],
+            "median_ns": 9788073,
+            "min_ns": 9685650,
+            "max_ns": 10623931,
+            "alloc_counts": [
+              10008
+            ],
+            "alloc_bytes": [
+              705971
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              9061996,
+              9478537,
+              9819002,
+              9532741,
+              9261679
+            ],
+            "median_ns": 9478537,
+            "min_ns": 9061996,
+            "max_ns": 9819002,
+            "alloc_counts": [
+              10008
+            ],
+            "alloc_bytes": [
+              705971
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_reader_to_log_000",
+          "base": {
+            "run_medians_ns": [
+              359137,
+              369411,
+              352291,
+              359246,
+              355096
+            ],
+            "median_ns": 359137,
+            "min_ns": 352291,
+            "max_ns": 369411,
+            "alloc_counts": [
+              561
+            ],
+            "alloc_bytes": [
+              1086041
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              361504,
+              365752,
+              401527,
+              376335,
+              359416
+            ],
+            "median_ns": 365752,
+            "min_ns": 359416,
+            "max_ns": 401527,
+            "alloc_counts": [
+              561
+            ],
+            "alloc_bytes": [
+              1086041
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              342154,
+              354020,
+              346104,
+              350171,
+              348756
+            ],
+            "median_ns": 348756,
+            "min_ns": 342154,
+            "max_ns": 354020,
+            "alloc_counts": [
+              561
+            ],
+            "alloc_bytes": [
+              1086041
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_show_corpus",
+          "base": {
+            "run_medians_ns": [
+              5202671,
+              5024146,
+              5114359,
+              4949481,
+              4910052
+            ],
+            "median_ns": 5024146,
+            "min_ns": 4910052,
+            "max_ns": 5202671,
+            "alloc_counts": [
+              6970
+            ],
+            "alloc_bytes": [
+              15174210
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              5094150,
+              5038073,
+              5350364,
+              5006608,
+              4974129
+            ],
+            "median_ns": 5038073,
+            "min_ns": 4974129,
+            "max_ns": 5350364,
+            "alloc_counts": [
+              6970
+            ],
+            "alloc_bytes": [
+              15174210
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              4895825,
+              5089854,
+              5032175,
+              5073256,
+              5178466
+            ],
+            "median_ns": 5073256,
+            "min_ns": 4895825,
+            "max_ns": 5178466,
+            "alloc_counts": [
+              6970
+            ],
+            "alloc_bytes": [
+              15174210
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_show_large",
+          "base": {
+            "run_medians_ns": [
+              1609212,
+              1603841,
+              1705708,
+              1556196,
+              1637727
+            ],
+            "median_ns": 1609212,
+            "min_ns": 1556196,
+            "max_ns": 1705708,
+            "alloc_counts": [
+              1542
+            ],
+            "alloc_bytes": [
+              5880164
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              1559310,
+              1561966,
+              1624339,
+              1526001,
+              1524977
+            ],
+            "median_ns": 1559310,
+            "min_ns": 1524977,
+            "max_ns": 1624339,
+            "alloc_counts": [
+              1542
+            ],
+            "alloc_bytes": [
+              5880164
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              1503675,
+              1545002,
+              1582208,
+              1500675,
+              1573737
+            ],
+            "median_ns": 1545002,
+            "min_ns": 1500675,
+            "max_ns": 1582208,
+            "alloc_counts": [
+              1542
+            ],
+            "alloc_bytes": [
+              5880164
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_show_metadata",
+          "base": {
+            "run_medians_ns": [
+              344156,
+              341270,
+              337269,
+              338252,
+              341462
+            ],
+            "median_ns": 341270,
+            "min_ns": 337269,
+            "max_ns": 344156,
+            "alloc_counts": [
+              955
+            ],
+            "alloc_bytes": [
+              772733
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              346860,
+              344531,
+              349910,
+              343773,
+              341994
+            ],
+            "median_ns": 344531,
+            "min_ns": 341994,
+            "max_ns": 349910,
+            "alloc_counts": [
+              955
+            ],
+            "alloc_bytes": [
+              772733
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              325537,
+              328952,
+              343579,
+              323902,
+              330818
+            ],
+            "median_ns": 328952,
+            "min_ns": 323902,
+            "max_ns": 343579,
+            "alloc_counts": [
+              955
+            ],
+            "alloc_bytes": [
+              772733
+            ]
+          },
+          "original_bound_regression": false
+        },
+        {
+          "name": "bench::render_show_typical",
+          "base": {
+            "run_medians_ns": [
+              2871300,
+              3008972,
+              3080221,
+              2864229,
+              3076179
+            ],
+            "median_ns": 3008972,
+            "min_ns": 2864229,
+            "max_ns": 3080221,
+            "alloc_counts": [
+              4473
+            ],
+            "alloc_bytes": [
+              8521313
+            ]
+          },
+          "current": {
+            "run_medians_ns": [
+              2925506,
+              3021364,
+              3194783,
+              3026167,
+              2962494
+            ],
+            "median_ns": 3021364,
+            "min_ns": 2925506,
+            "max_ns": 3194783,
+            "alloc_counts": [
+              4473
+            ],
+            "alloc_bytes": [
+              8521313
+            ]
+          },
+          "optimized": {
+            "run_medians_ns": [
+              2839179,
+              3405014,
+              2915708,
+              2813016,
+              2975938
+            ],
+            "median_ns": 2915708,
+            "min_ns": 2813016,
+            "max_ns": 3405014,
+            "alloc_counts": [
+              4473
+            ],
+            "alloc_bytes": [
+              8521313
+            ]
+          },
+          "original_bound_regression": false
+        }
+      ],
+      "interpretation": "Corpus medians base 5024146 ns, current 5038073 ns, optimized 5073256 ns. Current range 376235 ns and optimized range 282641 ns; optimized was 35183 ns slower than current, well within spread. No attributable benefit. The 11 renderer rows here do not constitute the required full 22-row acceptance run."
+    },
+    "unverified": [
+      "No A0..BF false-positive path allocation or RSS observation; full 103 fixture output and corrected bare-control literal comparisons, production binary sizes and RSS, sanitizer mutation inventory, and final workspace tests/lint/clippy not run after rejection.",
+      "No Linux measurement; isolated assembly does not prove actual inlined production code shape."
+    ]
   }
 }
