@@ -5,7 +5,7 @@
   "admission_revision": "a62779107f111ee072f467d4f951098e8df1c106",
   "candidate_source_sha256": "ca33beb0e8b0ad1ead28f1a11321ce91e5b7a9f7db48ed77236a2a1f369c1db0",
   "attempt_patch_sha256": "a2b20c97ab71101cd752edd9c8f258ca0e3747485751573cf96bdcfed7789537",
-  "attempt_patch": "diff --git a/src/render.rs b/src/render.rs\nindex 187d7f8..23ff759 100644\n--- a/src/render.rs\n+++ b/src/render.rs\n@@ -1116,7 +1116,7 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {\n }\n \n fn has_terminal_controls(line: &str) -> bool {\n-    line.chars().any(|character| character.is_control() && character != '\\t')\n+    line.bytes().any(|byte| (byte < 0x20 && byte != b'\\t') || byte == 0x7f || byte == 0xc2)\n }\n \n /// Remove terminal control sequences and bare controls from parser input,\n@@ -1475,6 +1475,25 @@ mod tests {\n         assert_eq!(actual, expected.as_bytes());\n     }\n \n+    #[test]\n+    fn control_scan_covers_ascii_and_c1_boundaries() {\n+        for code in 0..=0x1f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert_eq!(has_terminal_controls(&ch.to_string()), code != 0x09, \"U+{code:04X}\");\n+        }\n+        assert!(!has_terminal_controls(\" ~\"));\n+        assert!(has_terminal_controls(\"\\u{7f}\"));\n+        for code in 0x80..=0x9f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert!(has_terminal_controls(&ch.to_string()), \"U+{code:04X}\");\n+        }\n+        // U+00A0 shares the C2 prefix: the conservative scan may use the\n+        // sanitizer, which must preserve this and other non-control Unicode.\n+        let mut output = String::new();\n+        strip_terminal_controls_append(\"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\", &mut output);\n+        assert_eq!(output, \"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\");\n+    }\n+\n     #[test]\n     fn direct_metadata_keeps_text_but_drops_terminal_controls() {\n         let input = concat!(\n",
+  "attempt_patch": "diff --git a/src/render.rs b/src/render.rs\nindex 187d7f8..23ff759 100644\n--- a/src/render.rs\n+++ b/src/render.rs\n@@ -1116,7 +1116,7 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {\n }\n \n fn has_terminal_controls(line: &str) -> bool {\n-    line.chars().any(|character| character.is_control() && character != '\\t')\n+    line.bytes().any(|byte| (byte < 0x20 && byte != b'\\t') || byte == 0x7f || byte == 0xc2)\n }\n \n /// Remove terminal control sequences and bare controls from parser input,\n@@ -1475,6 +1475,25 @@ mod tests {\n         assert_eq!(actual, expected.as_bytes());\n     }\n \n+    #[test]\n+    fn control_scan_covers_ascii_and_c1_boundaries() {\n+        for code in 0..=0x1f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert_eq!(has_terminal_controls(&ch.to_string()), code != 0x09, \"U+{code:04X}\");\n+        }\n+        assert!(!has_terminal_controls(\" ~\"));\n+        assert!(has_terminal_controls(\"\\u{7f}\"));\n+        for code in 0x80..=0x9f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert!(has_terminal_controls(&ch.to_string()), \"U+{code:04X}\");\n+        }\n+        // U+00A0 shares the C2 prefix: the conservative scan may use the\n+        // sanitizer, which must preserve this and other non-control Unicode.\n+        let mut output = String::new();\n+        strip_terminal_controls_append(\"\\t ~\\u{00a0}é中😀\", &mut output);\n+        assert_eq!(output, \"\\t ~\\u{00a0}é中😀\");\n+    }\n+\n     #[test]\n     fn direct_metadata_keeps_text_but_drops_terminal_controls() {\n         let input = concat!(\n",
   "platform": "Darwin arm64, 18 logical cores; rustc 1.102.0-nightly (5b7b37aef 2026-11-08)",
   "benchmark_files_sha256": {
     "benches/bench.rs": "87a10fd98c4e46cdeb8576992592af0a781fe9259f2c09663528cfa310d1fa43",
@@ -988,7 +988,7 @@
       "current": "2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b",
       "optimized": "17d71c876efbcd8b4c1581ed19d797c25b39d86321c2b210b801006d21236bdd"
     },
-    "patch": "diff --git a/src/render.rs b/src/render.rs\nindex 187d7f8..fd99dc8 100644\n--- a/src/render.rs\n+++ b/src/render.rs\n@@ -1116,7 +1116,9 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {\n }\n \n fn has_terminal_controls(line: &str) -> bool {\n-    line.chars().any(|character| character.is_control() && character != '\\t')\n+    line.bytes().fold(false, |found, byte| {\n+        found | ((byte < 0x20) & (byte != b'\\t')) | (byte == 0x7f) | (byte == 0xc2)\n+    })\n }\n \n /// Remove terminal control sequences and bare controls from parser input,\n@@ -1475,6 +1477,25 @@ mod tests {\n         assert_eq!(actual, expected.as_bytes());\n     }\n \n+    #[test]\n+    fn control_scan_covers_ascii_and_c1_boundaries() {\n+        for code in 0..=0x1f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert_eq!(has_terminal_controls(&ch.to_string()), code != 0x09, \"U+{code:04X}\");\n+        }\n+        assert!(!has_terminal_controls(\" ~\"));\n+        assert!(has_terminal_controls(\"\\u{7f}\"));\n+        for code in 0x80..=0x9f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert!(has_terminal_controls(&ch.to_string()), \"U+{code:04X}\");\n+        }\n+        // U+00A0 shares the C2 prefix: the conservative scan may use the\n+        // sanitizer, which must preserve this and other non-control Unicode.\n+        let mut output = String::new();\n+        strip_terminal_controls_append(\"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\", &mut output);\n+        assert_eq!(output, \"\\t ~\\u{00a0}\u00e9\u4e2d\ud83d\ude00\");\n+    }\n+\n     #[test]\n     fn direct_metadata_keeps_text_but_drops_terminal_controls() {\n         let input = concat!(\n",
+    "patch": "diff --git a/src/render.rs b/src/render.rs\nindex 187d7f8..fd99dc8 100644\n--- a/src/render.rs\n+++ b/src/render.rs\n@@ -1116,7 +1116,9 @@ fn expand_tabs(s: &str) -> Cow<'_, str> {\n }\n \n fn has_terminal_controls(line: &str) -> bool {\n-    line.chars().any(|character| character.is_control() && character != '\\t')\n+    line.bytes().fold(false, |found, byte| {\n+        found | ((byte < 0x20) & (byte != b'\\t')) | (byte == 0x7f) | (byte == 0xc2)\n+    })\n }\n \n /// Remove terminal control sequences and bare controls from parser input,\n@@ -1475,6 +1477,25 @@ mod tests {\n         assert_eq!(actual, expected.as_bytes());\n     }\n \n+    #[test]\n+    fn control_scan_covers_ascii_and_c1_boundaries() {\n+        for code in 0..=0x1f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert_eq!(has_terminal_controls(&ch.to_string()), code != 0x09, \"U+{code:04X}\");\n+        }\n+        assert!(!has_terminal_controls(\" ~\"));\n+        assert!(has_terminal_controls(\"\\u{7f}\"));\n+        for code in 0x80..=0x9f {\n+            let ch = char::from_u32(code).unwrap();\n+            assert!(has_terminal_controls(&ch.to_string()), \"U+{code:04X}\");\n+        }\n+        // U+00A0 shares the C2 prefix: the conservative scan may use the\n+        // sanitizer, which must preserve this and other non-control Unicode.\n+        let mut output = String::new();\n+        strip_terminal_controls_append(\"\\t ~\\u{00a0}é中😀\", &mut output);\n+        assert_eq!(output, \"\\t ~\\u{00a0}é中😀\");\n+    }\n+\n     #[test]\n     fn direct_metadata_keeps_text_but_drops_terminal_controls() {\n         let input = concat!(\n",
     "patch_sha256": "2a3e713681174597f1b9b44293f58f6641252d36c081ce24873d6b37d132abcc",
     "assembly_experiment": {
       "source": "#[no_mangle]\npub fn scan(line: &str) -> bool {\n    line.bytes().fold(false, |found, byte| {\n        found | ((byte < 0x20) & (byte != b'\\t')) | (byte == 0x7f) | (byte == 0xc2)\n    })\n}\n",
@@ -1677,6 +1677,1099 @@
     "unverified": [
       "No A0..BF false-positive path allocation or RSS observation; full 103 fixture output and corrected bare-control literal comparisons, production binary sizes and RSS, sanitizer mutation inventory, and final workspace tests/lint/clippy not run after rejection.",
       "No Linux measurement; isolated assembly does not prove actual inlined production code shape."
+    ]
+  },
+  "higher_precision_final": {
+    "candidate_revision": "5285283d20f1cecdf6a89b688d351a9e1140d829",
+    "baseline_revision": "49a1c97d1f60932c3d860318672ecdcc545a0986",
+    "verdict": "No row exceeds both 2% and observed spread in this batch; original runtime regression remains unresolved, no source optimization accepted",
+    "configuration": {
+      "profile": "dist",
+      "features": "default",
+      "platform": "Darwin arm64",
+      "logical_cores": 18,
+      "sample_count": 15,
+      "sample_size": 20,
+      "runs_per_side": 5,
+      "order": "alternate base/current then current/base",
+      "rustybench_cli": "0.4.0",
+      "rustybench_library": "0.5.0",
+      "rustc": "1.102.0-nightly 5b7b37aef, LLVM23.1.5"
+    },
+    "gates": {
+      "pre": 20,
+      "benchmark": 20,
+      "immediate_post": 20,
+      "all_exit_zero": true,
+      "controller_exit": 0
+    },
+    "source": {
+      "render_sha256": "2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b",
+      "lock_sha256": "11fa85bf38485289c3efc7e6e406251179f8a4ba0e71130820e1d33ffb72d2c8",
+      "production_changed_since_original_measurement": false,
+      "correctness_and_memory_reuse": "docs/deslop-tests-performance.json, same production source and lock; intervening source changes are cfg(test) navigation and integration tests"
+    },
+    "interpretation": "Corpus median4.928496ms ->5.181848ms (+5.14%), delta253352ns is below371858ns observed range. Earlier batch reported7.97% beyond its spread; higher precision rotated three-side comparison reported unchanged-current +0.27%. Variability prevents attributing the original result to control scanning. This is not a speedup or a claim that the candidate is faster. Further unstripped profiling is separate from timing.",
+    "rows": [
+      {
+        "package": "diff-pretty",
+        "name": "bench::pager_viewport_show_010",
+        "baseline": {
+          "name": "bench::pager_viewport_show_010",
+          "median_ns": 3560,
+          "min_ns": 3496,
+          "max_ns": 3931,
+          "run_medians_ns": [
+            3819,
+            3560,
+            3931,
+            3496,
+            3543
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "name": "bench::pager_viewport_show_010",
+          "median_ns": 3527,
+          "min_ns": 3456,
+          "max_ns": 3931,
+          "run_medians_ns": [
+            3537,
+            3456,
+            3527,
+            3483,
+            3931
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "delta_ns": -33,
+        "delta_percent": -0.9269662921348315,
+        "spread_ns": 475,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_document_show_010",
+        "baseline": {
+          "name": "bench::render_document_show_010",
+          "median_ns": 66248,
+          "min_ns": 60923,
+          "max_ns": 67466,
+          "run_medians_ns": [
+            67258,
+            60923,
+            67466,
+            65377,
+            66248
+          ],
+          "alloc_counts": [
+            65
+          ],
+          "alloc_bytes": [
+            62104
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_document_show_010",
+          "median_ns": 65629,
+          "min_ns": 63289,
+          "max_ns": 71274,
+          "run_medians_ns": [
+            65521,
+            63289,
+            65629,
+            65636,
+            71274
+          ],
+          "alloc_counts": [
+            65
+          ],
+          "alloc_bytes": [
+            62104
+          ]
+        },
+        "delta_ns": -619,
+        "delta_percent": -0.9343678299722256,
+        "spread_ns": 7985,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_log_000",
+        "baseline": {
+          "name": "bench::render_log_000",
+          "median_ns": 348458,
+          "min_ns": 340210,
+          "max_ns": 355233,
+          "run_medians_ns": [
+            355154,
+            340210,
+            343070,
+            355233,
+            348458
+          ],
+          "alloc_counts": [
+            532
+          ],
+          "alloc_bytes": [
+            1049867
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_log_000",
+          "median_ns": 356048,
+          "min_ns": 351019,
+          "max_ns": 370138,
+          "run_medians_ns": [
+            351510,
+            351019,
+            369133,
+            370138,
+            356048
+          ],
+          "alloc_counts": [
+            532
+          ],
+          "alloc_bytes": [
+            1049867
+          ]
+        },
+        "delta_ns": 7590,
+        "delta_percent": 2.1781678136245977,
+        "spread_ns": 19119,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_log_000_color",
+        "baseline": {
+          "name": "bench::render_log_000_color",
+          "median_ns": 400117,
+          "min_ns": 389412,
+          "max_ns": 422310,
+          "run_medians_ns": [
+            407579,
+            389412,
+            399999,
+            422310,
+            400117
+          ],
+          "alloc_counts": [
+            535
+          ],
+          "alloc_bytes": [
+            1102088
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_log_000_color",
+          "median_ns": 391875,
+          "min_ns": 388362,
+          "max_ns": 411629,
+          "run_medians_ns": [
+            388362,
+            389573,
+            391875,
+            397383,
+            411629
+          ],
+          "alloc_counts": [
+            535
+          ],
+          "alloc_bytes": [
+            1102088
+          ]
+        },
+        "delta_ns": -8242,
+        "delta_percent": -2.0598974799871037,
+        "spread_ns": 32898,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_plain_unified",
+        "baseline": {
+          "name": "bench::render_plain_unified",
+          "median_ns": 1277,
+          "min_ns": 1238,
+          "max_ns": 1616,
+          "run_medians_ns": [
+            1262,
+            1616,
+            1238,
+            1308,
+            1277
+          ],
+          "alloc_counts": [
+            26
+          ],
+          "alloc_bytes": [
+            2743
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_plain_unified",
+          "median_ns": 1273,
+          "min_ns": 1225,
+          "max_ns": 1325,
+          "run_medians_ns": [
+            1225,
+            1273,
+            1254,
+            1283,
+            1325
+          ],
+          "alloc_counts": [
+            26
+          ],
+          "alloc_bytes": [
+            2743
+          ]
+        },
+        "delta_ns": -4,
+        "delta_percent": -0.31323414252153486,
+        "spread_ns": 378,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_reader_document_synthetic_git_log_10000",
+        "baseline": {
+          "name": "bench::render_reader_document_synthetic_git_log_10000",
+          "median_ns": 10447520,
+          "min_ns": 10144941,
+          "max_ns": 11292875,
+          "run_medians_ns": [
+            10144941,
+            10395856,
+            10447520,
+            11292875,
+            10598144
+          ],
+          "alloc_counts": [
+            10008
+          ],
+          "alloc_bytes": [
+            705971
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_reader_document_synthetic_git_log_10000",
+          "median_ns": 9841475,
+          "min_ns": 9466660,
+          "max_ns": 10937569,
+          "run_medians_ns": [
+            9466660,
+            9841475,
+            9798344,
+            10200091,
+            10937569
+          ],
+          "alloc_counts": [
+            10008
+          ],
+          "alloc_bytes": [
+            705971
+          ]
+        },
+        "delta_ns": -606045,
+        "delta_percent": -5.800850345345116,
+        "spread_ns": 1470909,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_reader_to_log_000",
+        "baseline": {
+          "name": "bench::render_reader_to_log_000",
+          "median_ns": 353906,
+          "min_ns": 352789,
+          "max_ns": 368683,
+          "run_medians_ns": [
+            352789,
+            353906,
+            353007,
+            368683,
+            361213
+          ],
+          "alloc_counts": [
+            561
+          ],
+          "alloc_bytes": [
+            1086041
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_reader_to_log_000",
+          "median_ns": 361352,
+          "min_ns": 357957,
+          "max_ns": 401139,
+          "run_medians_ns": [
+            361352,
+            358389,
+            376398,
+            357957,
+            401139
+          ],
+          "alloc_counts": [
+            561
+          ],
+          "alloc_bytes": [
+            1086041
+          ]
+        },
+        "delta_ns": 7446,
+        "delta_percent": 2.10394850610049,
+        "spread_ns": 43182,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_corpus",
+        "baseline": {
+          "name": "bench::render_show_corpus",
+          "median_ns": 4928496,
+          "min_ns": 4814135,
+          "max_ns": 5180641,
+          "run_medians_ns": [
+            4867379,
+            4814135,
+            4928496,
+            5180641,
+            5053601
+          ],
+          "alloc_counts": [
+            6970
+          ],
+          "alloc_bytes": [
+            15174210
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_show_corpus",
+          "median_ns": 5181848,
+          "min_ns": 4972569,
+          "max_ns": 5344427,
+          "run_medians_ns": [
+            4972569,
+            5140677,
+            5210554,
+            5181848,
+            5344427
+          ],
+          "alloc_counts": [
+            6970
+          ],
+          "alloc_bytes": [
+            15174210
+          ]
+        },
+        "delta_ns": 253352,
+        "delta_percent": 5.140554035145813,
+        "spread_ns": 371858,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_large",
+        "baseline": {
+          "name": "bench::render_show_large",
+          "median_ns": 1613992,
+          "min_ns": 1516777,
+          "max_ns": 1642085,
+          "run_medians_ns": [
+            1621387,
+            1516777,
+            1545754,
+            1642085,
+            1613992
+          ],
+          "alloc_counts": [
+            1542
+          ],
+          "alloc_bytes": [
+            5880164
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_show_large",
+          "median_ns": 1601754,
+          "min_ns": 1538385,
+          "max_ns": 1624998,
+          "run_medians_ns": [
+            1538385,
+            1616350,
+            1546719,
+            1601754,
+            1624998
+          ],
+          "alloc_counts": [
+            1542
+          ],
+          "alloc_bytes": [
+            5880164
+          ]
+        },
+        "delta_ns": -12238,
+        "delta_percent": -0.7582441548656994,
+        "spread_ns": 125308,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_metadata",
+        "baseline": {
+          "name": "bench::render_show_metadata",
+          "median_ns": 342904,
+          "min_ns": 325414,
+          "max_ns": 352378,
+          "run_medians_ns": [
+            342904,
+            325414,
+            346767,
+            339021,
+            352378
+          ],
+          "alloc_counts": [
+            955
+          ],
+          "alloc_bytes": [
+            772733
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_show_metadata",
+          "median_ns": 350856,
+          "min_ns": 337146,
+          "max_ns": 363752,
+          "run_medians_ns": [
+            337146,
+            350856,
+            341689,
+            352844,
+            363752
+          ],
+          "alloc_counts": [
+            955
+          ],
+          "alloc_bytes": [
+            772733
+          ]
+        },
+        "delta_ns": 7952,
+        "delta_percent": 2.319016401091851,
+        "spread_ns": 26964,
+        "regression": false
+      },
+      {
+        "package": "diff-pretty",
+        "name": "bench::render_show_typical",
+        "baseline": {
+          "name": "bench::render_show_typical",
+          "median_ns": 2916191,
+          "min_ns": 2804454,
+          "max_ns": 2984146,
+          "run_medians_ns": [
+            2916191,
+            2804454,
+            2866802,
+            2984146,
+            2943072
+          ],
+          "alloc_counts": [
+            4473
+          ],
+          "alloc_bytes": [
+            8521313
+          ]
+        },
+        "candidate": {
+          "name": "bench::render_show_typical",
+          "median_ns": 2983762,
+          "min_ns": 2839462,
+          "max_ns": 3156676,
+          "run_medians_ns": [
+            2839462,
+            3073806,
+            2953852,
+            2983762,
+            3156676
+          ],
+          "alloc_counts": [
+            4473
+          ],
+          "alloc_bytes": [
+            8521313
+          ]
+        },
+        "delta_ns": 67571,
+        "delta_percent": 2.317097885563737,
+        "spread_ns": 317214,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::cached_search_redraw",
+        "baseline": {
+          "name": "bench::cached_search_redraw",
+          "median_ns": 8933,
+          "min_ns": 8571,
+          "max_ns": 9769,
+          "run_medians_ns": [
+            9769,
+            8729,
+            9658,
+            8571,
+            8933
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "name": "bench::cached_search_redraw",
+          "median_ns": 8877,
+          "min_ns": 8704,
+          "max_ns": 10077,
+          "run_medians_ns": [
+            8704,
+            8877,
+            8935,
+            10077,
+            8710
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "delta_ns": -56,
+        "delta_percent": -0.6268890630247397,
+        "spread_ns": 1373,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::filtered_stream_and_redraw_500k",
+        "baseline": {
+          "name": "bench::filtered_stream_and_redraw_500k",
+          "median_ns": 1748163,
+          "min_ns": 1696429,
+          "max_ns": 2042093,
+          "run_medians_ns": [
+            1937103,
+            1696429,
+            2042093,
+            1714809,
+            1748163
+          ],
+          "alloc_counts": [
+            169
+          ],
+          "alloc_bytes": [
+            20130
+          ]
+        },
+        "candidate": {
+          "name": "bench::filtered_stream_and_redraw_500k",
+          "median_ns": 1808371,
+          "min_ns": 1785654,
+          "max_ns": 2062220,
+          "run_medians_ns": [
+            1785654,
+            1808371,
+            1835610,
+            1806703,
+            2062220
+          ],
+          "alloc_counts": [
+            169
+          ],
+          "alloc_bytes": [
+            20130
+          ]
+        },
+        "delta_ns": 60208,
+        "delta_percent": 3.444072434893085,
+        "spread_ns": 345664,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::filtered_stream_and_redraw_50k",
+        "baseline": {
+          "name": "bench::filtered_stream_and_redraw_50k",
+          "median_ns": 179935,
+          "min_ns": 167720,
+          "max_ns": 198765,
+          "run_medians_ns": [
+            192417,
+            168727,
+            198765,
+            167720,
+            179935
+          ],
+          "alloc_counts": [
+            52
+          ],
+          "alloc_bytes": [
+            13970
+          ]
+        },
+        "candidate": {
+          "name": "bench::filtered_stream_and_redraw_50k",
+          "median_ns": 175466,
+          "min_ns": 169441,
+          "max_ns": 203893,
+          "run_medians_ns": [
+            173696,
+            175466,
+            179985,
+            169441,
+            203893
+          ],
+          "alloc_counts": [
+            52
+          ],
+          "alloc_bytes": [
+            13970
+          ]
+        },
+        "delta_ns": -4469,
+        "delta_percent": -2.483674660293995,
+        "spread_ns": 34452,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::filtered_stream_and_redraw_5m",
+        "baseline": {
+          "name": "bench::filtered_stream_and_redraw_5m",
+          "median_ns": 18069358,
+          "min_ns": 17629856,
+          "max_ns": 20088253,
+          "run_medians_ns": [
+            19927363,
+            18069358,
+            20088253,
+            17629856,
+            17845448
+          ],
+          "alloc_counts": [
+            1335
+          ],
+          "alloc_bytes": [
+            82230
+          ]
+        },
+        "candidate": {
+          "name": "bench::filtered_stream_and_redraw_5m",
+          "median_ns": 18793896,
+          "min_ns": 18456346,
+          "max_ns": 19254391,
+          "run_medians_ns": [
+            18793896,
+            19254391,
+            18978754,
+            18535210,
+            18456346
+          ],
+          "alloc_counts": [
+            1335
+          ],
+          "alloc_bytes": [
+            82230
+          ]
+        },
+        "delta_ns": 724538,
+        "delta_percent": 4.009760612413568,
+        "spread_ns": 2458397,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::initial_regex_search_late_match",
+        "baseline": {
+          "name": "bench::initial_regex_search_late_match",
+          "median_ns": 2634314,
+          "min_ns": 2524881,
+          "max_ns": 2925911,
+          "run_medians_ns": [
+            2925911,
+            2524881,
+            2780433,
+            2547339,
+            2634314
+          ],
+          "alloc_counts": [
+            105
+          ],
+          "alloc_bytes": [
+            2085525
+          ]
+        },
+        "candidate": {
+          "name": "bench::initial_regex_search_late_match",
+          "median_ns": 2639653,
+          "min_ns": 2392933,
+          "max_ns": 3026298,
+          "run_medians_ns": [
+            2457904,
+            2392933,
+            2739070,
+            2639653,
+            3026298
+          ],
+          "alloc_counts": [
+            105
+          ],
+          "alloc_bytes": [
+            2085525
+          ]
+        },
+        "delta_ns": 5339,
+        "delta_percent": 0.2026713596025379,
+        "spread_ns": 633365,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::initial_search_late_match",
+        "baseline": {
+          "name": "bench::initial_search_late_match",
+          "median_ns": 2538112,
+          "min_ns": 2363025,
+          "max_ns": 2648168,
+          "run_medians_ns": [
+            2619661,
+            2363025,
+            2648168,
+            2538112,
+            2510643
+          ],
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            2084795
+          ]
+        },
+        "candidate": {
+          "name": "bench::initial_search_late_match",
+          "median_ns": 2562940,
+          "min_ns": 2341179,
+          "max_ns": 2785063,
+          "run_medians_ns": [
+            2378098,
+            2341179,
+            2562940,
+            2610779,
+            2785063
+          ],
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            2084795
+          ]
+        },
+        "delta_ns": 24828,
+        "delta_percent": 0.9782074234706742,
+        "spread_ns": 443884,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::live_search_chunk_and_redraw",
+        "baseline": {
+          "name": "bench::live_search_chunk_and_redraw",
+          "median_ns": 1303545,
+          "min_ns": 1244595,
+          "max_ns": 1431297,
+          "run_medians_ns": [
+            1431297,
+            1247871,
+            1377458,
+            1303545,
+            1244595
+          ],
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            1054795
+          ]
+        },
+        "candidate": {
+          "name": "bench::live_search_chunk_and_redraw",
+          "median_ns": 1271842,
+          "min_ns": 1178737,
+          "max_ns": 1381217,
+          "run_medians_ns": [
+            1302631,
+            1178737,
+            1271842,
+            1227631,
+            1381217
+          ],
+          "alloc_counts": [
+            62
+          ],
+          "alloc_bytes": [
+            1054795
+          ]
+        },
+        "delta_ns": -31703,
+        "delta_percent": -2.432060266427319,
+        "spread_ns": 202480,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::session_redraw_without_movement",
+        "baseline": {
+          "name": "bench::session_redraw_without_movement",
+          "median_ns": 12554,
+          "min_ns": 11879,
+          "max_ns": 13179,
+          "run_medians_ns": [
+            12554,
+            12187,
+            13179,
+            13037,
+            11879
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "name": "bench::session_redraw_without_movement",
+          "median_ns": 11912,
+          "min_ns": 11823,
+          "max_ns": 13918,
+          "run_medians_ns": [
+            11912,
+            12452,
+            11823,
+            11889,
+            13918
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "delta_ns": -642,
+        "delta_percent": -5.113907917795125,
+        "spread_ns": 2095,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::viewport_redraw_horizontal_clip",
+        "baseline": {
+          "name": "bench::viewport_redraw_horizontal_clip",
+          "median_ns": 11041,
+          "min_ns": 10304,
+          "max_ns": 12306,
+          "run_medians_ns": [
+            10804,
+            11637,
+            12306,
+            11041,
+            10304
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "name": "bench::viewport_redraw_horizontal_clip",
+          "median_ns": 10808,
+          "min_ns": 10639,
+          "max_ns": 12481,
+          "run_medians_ns": [
+            10639,
+            10860,
+            10808,
+            10679,
+            12481
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "delta_ns": -233,
+        "delta_percent": -2.1103160945566524,
+        "spread_ns": 2002,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::viewport_redraw_no_search",
+        "baseline": {
+          "name": "bench::viewport_redraw_no_search",
+          "median_ns": 12866,
+          "min_ns": 11896,
+          "max_ns": 13348,
+          "run_medians_ns": [
+            12387,
+            12866,
+            13041,
+            13348,
+            11896
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "name": "bench::viewport_redraw_no_search",
+          "median_ns": 12300,
+          "min_ns": 11614,
+          "max_ns": 13606,
+          "run_medians_ns": [
+            11614,
+            13606,
+            11989,
+            12300,
+            13350
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "delta_ns": -566,
+        "delta_percent": -4.399191667962071,
+        "spread_ns": 1992,
+        "regression": false
+      },
+      {
+        "package": "scrl",
+        "name": "bench::viewport_redraw_styled",
+        "baseline": {
+          "name": "bench::viewport_redraw_styled",
+          "median_ns": 9535,
+          "min_ns": 8979,
+          "max_ns": 9706,
+          "run_medians_ns": [
+            8979,
+            9627,
+            9516,
+            9706,
+            9535
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "candidate": {
+          "name": "bench::viewport_redraw_styled",
+          "median_ns": 9271,
+          "min_ns": 8404,
+          "max_ns": 9750,
+          "run_medians_ns": [
+            8408,
+            9271,
+            8404,
+            9750,
+            9508
+          ],
+          "alloc_counts": [
+            1
+          ],
+          "alloc_bytes": [
+            120
+          ]
+        },
+        "delta_ns": -264,
+        "delta_percent": -2.7687467226009437,
+        "spread_ns": 1346,
+        "regression": false
+      }
+    ],
+    "reproduction": {
+      "setup": "In a fresh canonical repository, create isolated .work/wt/ds-perf-base at the baseline revision and .work/wt/ds at the candidate revision. Install existing pinned tools without changing manifests. Recreate the scripts below; all receipts are disposable. Each benchmark fixture and benchmark source is unchanged between revisions.",
+      "script": "#!/bin/zsh\nset -u\nroot=/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds\nbase=/Users/josh/repos/laputa-systems/diff-pretty/.work/wt/ds-perf-base\nexport PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH RUSTC_WRAPPER=kache CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=clang RUSTFLAGS='-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -Clink-arg=-Wl,-dead_strip_dylibs'\nfor tree in \"$base\" \"$root\"; do\n  cd \"$tree\" || exit 1\n  export TMPDIR=$PWD/.work/tmp CARGO_TARGET_DIR=$PWD/.work/perf-final22-target\n  mkdir -p \"$TMPDIR\"\n  for package in diff-pretty scrl; do\n    cpu-guard --cores 2 -- cargo bench -p \"$package\" --bench bench --profile dist -Z build-std=std -Z build-std-features= -Z panic-abort-tests --target aarch64-apple-darwin --no-run >> \"$root/.work/tmp/final22-build.log\" 2>&1 || exit 49\n  done\ndone\nfor package in diff-pretty scrl; do\n  for iteration in 1 2 3 4 5; do\n    if (( iteration % 2 == 1 )); then sides=(base current); else sides=(current base); fi\n    for side in \"${sides[@]}\"; do\n      if [ \"$side\" = base ]; then tree=$base; else tree=$root; fi\n      cd \"$tree\" || exit 1\n      export TMPDIR=$PWD/.work/tmp CARGO_TARGET_DIR=$PWD/.work/perf-final22-target\n      label=final22-${package}-${iteration}-${side}\n      uptime > \"$root/.work/tmp/$label.load\"\n      sysctl -n hw.ncpu >> \"$root/.work/tmp/$label.load\"\n      perf-gate-ready > \"$root/.work/tmp/$label.pre\" 2>&1\n      pre=$?\n      if [ \"$pre\" -ne 0 ]; then print \"$label pre=$pre\"; exit 50; fi\n      cpu-guard --cores 2 -- rustybench baseline --baseline \"$root/.work/tmp/$label.json\" --warmup 1 --runs 1 --sample-count 15 --sample-size 20 -- cargo bench -p \"$package\" --bench bench --profile dist -Z build-std=std -Z build-std-features= -Z panic-abort-tests --target aarch64-apple-darwin > \"$root/.work/tmp/$label.log\" 2>&1\n      run=$?\n      perf-gate-ready -1 > \"$root/.work/tmp/$label.post\" 2>&1\n      post=$?\n      print \"$label pre=$pre run=$run post=$post\"\n      if [ \"$run\" -ne 0 ] || [ \"$post\" -ne 0 ]; then exit 51; fi\n    done\n  done\ndone\n",
+      "reduction": "def median: sort | .[(length / 2 | floor)];\ndef summarize:\n  map(.benchmarks[]) | group_by(.name) | map({\n    name: .[0].name,\n    median_ns: (map(.median_ns) | median),\n    min_ns: (map(.median_ns) | min),\n    max_ns: (map(.median_ns) | max),\n    run_medians_ns: map(.median_ns),\n    alloc_counts: (map(.alloc_count) | unique),\n    alloc_bytes: (map(.alloc_bytes) | unique)\n  });\nif length != 10 or any(.[]; .sample_count != 15 or .sample_size != 20) then error(\"wrong measurement configuration\") else . end |\n(.[0:5] | summarize) as $base |\n(.[5:10] | summarize) as $candidate |\n[range(0; ($base | length)) | . as $i |\n  $base[$i] as $b | $candidate[$i] as $c |\n  if $b.name != $c.name then error(\"row mismatch\") else . end |\n  ($c.median_ns - $b.median_ns) as $delta |\n  ([$b.max_ns-$b.min_ns, $c.max_ns-$c.min_ns] | max) as $spread |\n  {package: $package, name: $b.name, baseline: $b, candidate: $c, delta_ns: $delta,\n   delta_percent: (100 * $delta / $b.median_ns), spread_ns: $spread,\n   regression: ($delta > 0.02 * $b.median_ns and $delta > $spread)}\n]\n",
+      "reduction_invocation": "For each package, concatenate its five *-base.json files in iteration order, then five *-current.json files; pipe to jaq -s --arg package PACKAGE -f rows.jaq. Combine the resulting two arrays with cat and jaq -s add. All JSON processing used jaq."
+    },
+    "limitations": [
+      "Linux not measured",
+      "Known unrelated VM load remains; no services stopped, all actual gates exit0",
+      "Original regression has no demonstrated mechanism yet; candidate remains parked for broader Tests qualification"
+    ]
+  },
+  "separate_unstripped_profile": {
+    "purpose": "Identify CPU limiter without reporting profiled timings",
+    "configuration": "same optimization/target/RUSTFLAGS, symbols retained and debug=1 only for profiling",
+    "commands": "Build each pinned side with the production bench command plus CARGO_PROFILE_DIST_STRIP=false CARGO_PROFILE_DIST_DEBUG=1 and a distinct .work/profile-native-target. Find its /out/bench-<hash> executable. Run it under cpu-guard --cores 2 with --bench render_show_corpus --sample-count 100 --sample-size 20 --min-time 5 --max-time 10; sample its owned PID using /usr/bin/sample PID 2 1 -file PROFILE. Keep profiling separate from shipping timings; the initial direct invocation without --bench ran once and yielded no valid stacks, and is excluded.",
+    "source_revisions": {
+      "baseline": "49a1c97d1f60932c3d860318672ecdcc545a0986",
+      "current": "5285283d20f1cecdf6a89b688d351a9e1140d829"
+    },
+    "exits": {
+      "builds": [
+        0,
+        0
+      ],
+      "samplers": [
+        0,
+        0
+      ],
+      "guarded_benchmarks": [
+        0,
+        0
+      ]
+    },
+    "observations": {
+      "baseline_stack_samples": 1436,
+      "current_stack_samples": 1456,
+      "baseline_reset_buffers_top_stack": 688,
+      "current_reset_buffers_top_stack": 655,
+      "current_render_chunk_line689_samples": 33
+    },
+    "interpretation": "Alignment::reset_buffers including inlined alignment filling dominates both CPU profiles; comparisons, tokenization, copies and allocations follow. The inlined control scan is not separately attributable from these two short profiles. No source optimization or runtime-regression explanation is established.",
+    "limitations": [
+      "One two-second sample per side, not a statistical timing comparison",
+      "Profiling builds retain symbols and line info; these are not the shipped binaries used for timings",
+      "Inlining prevents attributing all control-scan costs to one source line"
     ]
   }
 }
