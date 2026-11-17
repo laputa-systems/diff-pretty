@@ -5,6 +5,14 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+Session navigation: three literal frame/action scenarios cover page and edge
+movement, horizontal shifts, follow, help and search routing. The complete
+44-mutant five-method selection has 43 caught and one unviable, with no misses
+or timeouts; a restored page-down fault fails the new frame oracle. See
+[session navigation proof](docs/deslop-cli-tests.md#session-navigation).
+Session has no resize or half-page event/API; different initial sizes are tested.
+Live-loop and draw coverage, broader DSLP-4 and quiet-host gates remain open.
+
 Streaming-source completion: the complete ten-identity selection now has nine
 caught and one unviable, with no misses, timeouts or exclusions. The two
 initial empty-callback survivors fail the new rejecting consumer. Bounded
