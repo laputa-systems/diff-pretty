@@ -5,6 +5,13 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+Pager-entry and source-adapter completion: four real PTY cases and literal
+stream/error oracles pass. The complete current adapter inventory has seven
+caught, no other outcomes or exclusions, including the private production
+render/flush boundary. Restored dropped-error and skipped-flush faults fail.
+The release workspace suite, lint and workspace clippy pass (79 executable
+cases and one doctest). Broader coverage/API and quiet-host gates remain open.
+
 Pager-entry continuation: owned PTY and source-stream tests now witness Auto,
 Always, Never and read errors on macOS. The complete six-mutant source
 selection has six caught and no misses; the redirected public `emit_reader`

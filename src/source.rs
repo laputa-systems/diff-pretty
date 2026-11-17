@@ -86,6 +86,34 @@ mod tests {
         assert_eq!(error.to_string(), "read sentinel");
     }
 
+    struct FlushFailure(Vec<u8>);
+
+    impl Write for FlushFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("flush sentinel"))
+        }
+    }
+
+    #[test]
+    fn nonpaging_output_preserves_bytes_and_write_flush_errors() {
+        let mut bytes = Vec::new();
+        render_and_flush(Cursor::new(b"preamble\n"), &mut bytes).unwrap();
+        assert_eq!(bytes, b"preamble\n");
+        let mut full: &mut [u8] = &mut [];
+        let error = render_and_flush(Cursor::new(b"preamble\n"), &mut full).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+        let mut output = FlushFailure(Vec::new());
+        let error = render_and_flush(Cursor::new(b"preamble\n"), &mut output).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(error.to_string(), "flush sentinel");
+        assert_eq!(output.0, b"preamble\n");
+    }
+
     #[test]
     fn read_and_callback_errors_propagate_and_stop() {
         let mut calls = 0;

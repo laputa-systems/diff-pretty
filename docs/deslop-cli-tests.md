@@ -246,7 +246,7 @@ Always PTY test; empty `emit_reader` fails Auto and Always PTY cases; empty
 `produce` fails both source unit cases. The public policy test compares all
 three modes against actual stdout terminal state. The CLI tests exercise modes
 on a PTY and redirected output. `emit_reader`'s own redirected public fallback
-remains unwitnessed because `main` routes redirected output around it. No public
+was initially unwitnessed because `main` routes redirected output around it. No public
 test fixture, global stdio mutation, or libtest subprocess parsing was introduced.
 
 Reproduce with the shared `mutation.lock` acquired by atomic `mkdir` and
@@ -264,3 +264,23 @@ APIs, broader mutation and coverage, and quiet-host test cost/performance
 remain open. The old 1,146-mutant Full run remains incomplete, with 109
 untested and 48 unconfirmed timeouts. Existing CLI, numeric and terminal
 control selection counts are unchanged. DSLP-4 remains open.
+
+Parent completion adds a direct public `emit_reader(..., Never)` witness for
+empty input and the exact source error. Swallowing the rendering result makes
+its error assertion fail (exit 101); restoring it passes. A private,
+production-used `render_and_flush` helper preserves the direct branch's order
+and public API while allowing a literal nonempty output oracle, a short-writer
+error and a late flush failure. The flush fixture retains the rendered bytes
+and exact error; skipping flush fails it (exit 101). Neither test changes
+global stdio or requires a test-only export or consumer-build framework.
+
+The new complete `src/source.rs` selection includes that helper: seven
+caught, zero missed, unviable or timed out, raw exit 0, with a fresh root
+package baseline and all caught logs inspected. Its extra identity is distinct
+from the earlier six-case scope, not an improvement on the same inventory.
+Use the same command above with output `.work/pager-parent-mutants` and
+`CARGO_TARGET_DIR=$PWD/.work/target-pager-parent-mutants`. The full ordinary
+release workspace suite, lint and warnings-denied workspace clippy all pass
+with separate `.work/target-controls-final`: 79 executable cases and one
+doctest, no ignored cases. Latest-head Linux CI, refreshed coverage, remaining
+exported APIs and the quiet-host gates remain open.
