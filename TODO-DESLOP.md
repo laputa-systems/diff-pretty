@@ -1,5 +1,5 @@
 Prefix: DSLP
-Next: 9
+Next: 10
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
@@ -53,6 +53,18 @@ formats and dependencies are unchanged. The workspace is the affected consumer.
 - **Effort:** M
 
 
+### DSLP-9 · P2 · Alignment drops one-sided tokens and invents an empty operation
+
+- **Area:** alignment
+- **Where:** src/align.rs:104, src/align.rs:164; tests/alignment_api.rs
+- **Problem:** Assumed P2. Reproduced through the built public library: Alignment::new([], []) produces [(NoOp,1)] instead of no operations; aligning three tokens against an empty side produces [(Deletion,1)] instead of [(Deletion,3)]. cargo test --test alignment_api exits101 at both literal oracles. Initial boundary cells all point to origin, truncating multi-token boundary runs. Render callers tokenize with a sentinel, but external callers of the public Alignment API may use empty vectors.
+- **Recommendation:** Preserve all boundary operations and return no runs for empty/empty. Retain costs and deterministic tie-breaking; validate public token accounting, reference optimality, reset/reuse, corpus output and matched shipping-profile performance before merging.
+- **Fix with:** root-cause
+- **Effort:** M
+
+
+
+
 ### DSLP-6 · P3 · Guard CLI success and failure contracts at the process boundary
 
 - **Area:** CLI · tests
@@ -61,8 +73,6 @@ formats and dependencies are unchanged. The workspace is the affected consumer.
 - **Recommendation:** Add bounded process-level scenarios for valid direct output and representative invalid input and I/O errors for both commands, with literal output and exit assertions. Include src/main.rs and scrl/src/main.rs in the Tests step's critical mutation scope.
 - **Fix with:** test-audit
 - **Effort:** M
-
-
 
 
 ### DSLP-8 · P3 · Investigate unreachable legacy terminal runner branch
