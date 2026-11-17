@@ -104,3 +104,78 @@ Repeat the one timeout with `--timeout 120` and
 output directory. No exclusion was added. This qualifies the numeric component
 with 37 caught and one confirmed hang; the broader renderer/pager mutation,
 coverage, quiet-host cost and whole-change CI lane remain open.
+
+## Terminal-control rendering
+
+The next component adds independent literal output for direct, reader and
+incremental public rendering, plus a bounded real-executable oracle. Cases
+cover CSI, OSC with BEL or ST, DCS/PM/APC/SOS, embedded controls, malformed and
+incomplete sequences, Unicode and tabs. Plain unified input also preserves
+its literal path decoration. Disabling string-control termination passes all
+six previous CLI cases but fails the new oracle; metadata filtering, hunk
+filtering and the plain-input flag each have a restored fault witness.
+
+The expanded CLI case fails on unmutated `7711c9a`: a plain, uncolored hunk
+retains NUL and C1 controls. `render_chunk` enabled stripping only when the
+input contained ESC. Fix `f17f82f` shares `has_terminal_controls` with the
+stripper and checks the parsed lines, retaining tabs and ordinary Unicode.
+The same byte oracle passes after the fix. Public APIs, options and dependencies
+are unchanged; this repairs the documented terminal-control contract.
+
+| Selection | Caught | Missed | Unviable | Timeout |
+| --- | ---: | ---: | ---: | ---: |
+| `49a1c97`, original three sanitizer functions | 4 | 74 | 1 | 0 |
+| `7711c9a`, same 79 identities with initial new tests | 57 | 21 | 1 | 0 |
+| `f17f82f`, shared predicate and expanded oracle | 70 | 8 | 1 | 0 |
+
+The final inventory still has 79 entries, but includes the new predicate and
+replaces the former fast-path expressions; its identities are not the same
+selection as the first two rows. Each inventory also contains a tool-selected
+`FileInfo::new_plain` field mutation outside the function filter. That mutation
+is caught by the new literal plain-input case. No generated entry was dropped.
+
+The eight final misses are equivalent for observable output:
+
+- `has_terminal_controls` returning true, or changing its `&&` to `||`,
+  disables borrowing without changing the bytes the stripper produces.
+- Both `push_metadata_line` increments in its `None` fallback are unreachable:
+  the caller has established ESC, for which the scanner always returns `Some`.
+- Three scanner mutations change only the SGR-classification Boolean. Both
+  callers ignore that field; sequence consumption is unchanged.
+- Multiplying rather than adding one at the OSC BEL terminator leaves BEL
+  for the caller's next iteration, where it is removed as a bare control.
+
+The unviable `&&` to `||` replacement would introduce an invalid `let` chain.
+Every caught log contains a failure of the new CLI oracle. Its existing owned
+child helper kills and reaps a nonterminating executable after five seconds;
+those hangs are caught assertion failures, not cargo-mutants Timeout results.
+Raw tool exit 2 remains visible for the equivalent misses. No exclusion was added.
+
+Reproduce the final Scenario with cargo-mutants 27.1.0, one build job and test
+thread, under the shared mutation lock and a 1,200-second total bound:
+
+```sh
+cpu-guard --cores 2 -- cargo mutants --gitignore true --workspace \
+  --file src/render.rs \
+  --re 'has_terminal_controls|strip_terminal_controls_append|push_metadata_line|terminal_control_end' \
+  --test-workspace true --cargo-test-arg=--test --cargo-test-arg=cli \
+  --baseline run --timeout 60 --build-timeout 300 --jobs 1 --no-shuffle \
+  --output .work/controls-final
+```
+
+The actual test phase runs the renderer package's `cli` target: six tests
+before, seven after. Full ordinary verification remains `make test`, `make lint`
+and warnings-denied workspace clippy, all passing with a separate final target.
+Mutation and ordinary build targets must remain separate.
+
+The macOS ARM64 release-profile binaries both occupy 855,480 bytes. Their hashes
+differ, and executing them confirms the old binary retains a bare NUL while the
+candidate removes it. Five alternating RSS observations per side for each of
+`log_000.patch` and `log_000_color.patch` produce identical per-fixture output
+hashes and twenty successful exits. RSS ranges in bytes are respectively
+3,047,424–3,162,112 before versus 3,014,656–3,047,424 after, and
+3,112,960–3,145,728 before versus 3,047,424–3,080,192 after. These are bounded
+memory observations, not a claim of reduced memory use or production limits.
+Perf gate deferred: host busy. The declared workload's five paired timing runs,
+test-cost acceptance, coverage and other decision regions remain open; the
+draft stays unmerged.

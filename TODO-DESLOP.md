@@ -29,6 +29,17 @@ with a fresh baseline and a doubled timeout, zero missed or unviable. Every
 caught log contains a new numeric assertion failure. The broader renderer/pager
 scope and quiet-host acceptance remain open; DSLP-4 remains open.
 
+Terminal-control continuation: literal API and process oracles catch a defect
+the old CLI cases miss. Uncolored hunks previously retained bare NUL and C1
+controls because parsing only stripped chunks containing ESC. `f17f82f` shares
+the control predicate and fixes the demonstrated regression while retaining
+tabs and ordinary Unicode. The final bounded selection records 70 caught,
+eight equivalent misses, one unviable and zero timeouts, with complete
+dispositions and no exclusions. Full release workspace tests and lint pass.
+Release binary sizes match; paired RSS observations and qualification limits
+are recorded in the CLI evidence. Perf gate deferred: host busy. The declared
+workload, test-cost gate, other regions and whole-change CI lane remain open.
+
 Ground base: `e081d90fb98020ba64b307da178ccf3068e7e73e`. Rust code: 6.0k lines (fleet/loc/v1, vendored included, seeded). On macOS with a fresh scratch target, guarded `make test` took 15.41s cold and 1.40s warm; guarded `make lint` took 3.45s. All passed. PR CI now calls `make test`; platform-specific terminal tests run on their matching OS, and no missing-tool skip was found. No vendored trees found. The existing large-diff rendering benchmark is the declared perf workload; later scorecard measurements are pending.
 
 Types: escape-hatch lines 139 → 133. Candidate findings are deduplicated source locations; test and benchmark findings are excluded for unwrap/expect. Real means defect or deletable escape hatch; FP includes intentional code or findings outside typing scope.
