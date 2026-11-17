@@ -53,14 +53,6 @@ formats and dependencies are unchanged. The workspace is the affected consumer.
 - **Effort:** M
 
 
-### DSLP-9 · P2 · Alignment drops one-sided tokens and invents an empty operation
-
-- **Area:** alignment
-- **Where:** src/align.rs:104, src/align.rs:164; tests/alignment_api.rs
-- **Problem:** Assumed P2. Reproduced through the built public library: Alignment::new([], []) produces [(NoOp,1)] instead of no operations; aligning three tokens against an empty side produces [(Deletion,1)] instead of [(Deletion,3)]. cargo test --test alignment_api exits101 at both literal oracles. Initial boundary cells all point to origin, truncating multi-token boundary runs. Render callers tokenize with a sentinel, but external callers of the public Alignment API may use empty vectors.
-- **Recommendation:** Preserve all boundary operations and return no runs for empty/empty. Retain costs and deterministic tie-breaking; validate public token accounting, reference optimality, reset/reuse, corpus output and matched shipping-profile performance before merging.
-- **Fix with:** root-cause
-- **Effort:** M
 
 
 

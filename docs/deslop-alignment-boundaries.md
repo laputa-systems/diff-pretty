@@ -1,6 +1,6 @@
 # Alignment boundary evidence
 
-Status: incomplete. DSLP-9 remains open. The required workspace Clippy check fails in unchanged `scrl/src/lib.rs:165` on both baseline and candidate. The assigned scope does not permit editing that file. Performance and memory observations are recorded below. Complete acceptance remains unverified.
+Status: locally accepted. Empty and one-sided public inputs now return complete operations. The parent integrated the separate test-only Clippy repair from PR32 (`1010323e50d6a976b8f74fa2b14de69ef9743677`). Workspace all-feature tests and all-target Clippy then passed. Linux remains untested locally and must pass the pull request checks.
 
 ## Change and consumers
 
@@ -33,7 +33,7 @@ Both sides built `diff-pretty` and `scrl` on Darwin arm64 with rustc `1.102.0-ni
 
 Each of 103 `fixtures/*.patch` inputs was passed to each `diff-pretty --no-pager`; all exits were zero, stderr was empty, and output bytes matched. Their individual output lengths sum to 681067 bytes. The concatenated input is 265220 bytes, SHA-256 `ee880641b3a23f02678a17fc6e95499f18c29598441adcea838d5bad5a1d8277`. Both rendered it to 680988 bytes, SHA-256 `2f0d7e67e7442742fc8a903a193d6d5e56147b7bc58feb4c951d9ff44db4f772`.
 
-The workspace Clippy failure requires an out-of-scope correction before acceptance can be established.
+The parent merged the separately reviewed Clippy correction after the worker stopped. `cargo clippy --workspace --all-targets --all-features -- --deny warnings` and `cargo test --workspace --all-features` both exited 0 with the same ordinary target and two-core cap. The correction changes only an existing error assertion in `scrl` tests.
 
 
 ## Matched performance observations
