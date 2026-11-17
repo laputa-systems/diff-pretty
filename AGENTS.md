@@ -24,6 +24,7 @@ Rust renderer for Git-style unified diffs with an optional built-in pager.
 - Change: `make test` covers workspace unit cases, alignment API, CLI and PTY boundaries plus a doctest; no required missing-tool skip or ignored test was found. Ground's 1.40s warm cost above is the pre-change baseline, not a paired after-cost result.
 - Scenario: the complete CLI selection is 22 caught/two unviable; numeric layout is 37 caught/one confirmed hang. Both have reconciled identities. The older whole-workspace 1,146-case run is incomplete; broader mutation and coverage remain open. Runs have a 1,200-second ceiling; larger matrices remain manual Full work.
 - `diff-pretty` CLI paging flags, exact rendered output and exit 0/1/2: `tests/cli.rs`.
+- Pager entry: `tests/pager_entry.rs` covers real PTY Auto, Always, Never and read error on macOS; `src/source.rs` unit tests cover fragmented chunks and propagated errors. Public redirected `emit_reader` fallback remains untested; Linux execution is unverified.
 - `scrl` CLI flags, help, operands, output and errors: `scrl/tests/cli.rs`; auto paging with an actual terminal: `scrl/tests/auto_paging.rs`; non-Unicode parsing: `scrl/src/main.rs`.
 - Diff input and ANSI output: `src/render.rs` tests, including `public_render_to_matches_byte_exact_hunk_oracle`; full format coverage: none.
 - Renderer API: `src/render.rs` tests; alignment API: `tests/alignment_api.rs`; remaining exported API: none.

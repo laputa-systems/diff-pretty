@@ -13,6 +13,7 @@ regex-lite = "0.1.9"
 scrl = { path = "scrl" }
 
 [dev-dependencies]
+rustix = { version = "1.1", features = ["fs", "process", "pty", "termios"] }
 rustybench = "0.5"
 
 [[bench]]

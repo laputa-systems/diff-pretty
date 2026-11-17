@@ -224,3 +224,43 @@ cpu-guard --cores 2 -- cargo llvm-cov report --workspace --branch --summary-only
 Both commands exit 0. Keep `--workspace` on the report command too: omitting
 it reports only the renderer package, not this result. Timing/test-cost and
 performance gates remain deferred on the busy host; DSLP-4 stays open.
+
+## Pager entry and source adapter
+
+At base `7b2a67e2eb7e56ad27cdcf2877f375bd3303e549`, macOS PTY cases
+exercise Auto short output, Always entry and quit after an observed payload,
+Never, and an Auto input read failure. The PTY master is nonblocking; an owned
+child is killed and reaped on panic, with a five-second deadline. The tests
+check literal output, terminal modes, screen exit, status and stderr. Source
+unit cases use two-byte buffering, literal emitted chunks, and read and callback
+errors. The callback error stops further emission. Forcing the session paging
+field to Auto made the Always test fail at its observed-payload assertion; the
+fault was restored.
+
+Complete `src/source.rs` cargo-mutants 27.1.0 selection (no config or skipped
+calls) has six generated mutations, all caught, with no misses, timeouts or
+unviable mutations. The fresh baseline ran the root package suite, including
+20 library tests and four PTY tests. Every caught log was inspected: true and
+`&&` to `||` fail the public policy test; false and inverted fallback fail the
+Always PTY test; empty `emit_reader` fails Auto and Always PTY cases; empty
+`produce` fails both source unit cases. The public policy test compares all
+three modes against actual stdout terminal state. The CLI tests exercise modes
+on a PTY and redirected output. `emit_reader`'s own redirected public fallback
+remains unwitnessed because `main` routes redirected output around it. No public
+test fixture, global stdio mutation, or libtest subprocess parsing was introduced.
+
+Reproduce with the shared `mutation.lock` acquired by atomic `mkdir` and
+released by a shell EXIT trap, `PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`,
+`TMPDIR=$PWD/.work/tmp`, `RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`,
+`RUST_TEST_THREADS=1`, and a mutation-specific `CARGO_TARGET_DIR` distinct
+from ordinary tests:
+
+```sh
+timeout -k 5 1200 cpu-guard --cores 2 -- cargo mutants --in-place --no-config --skip-calls-defaults=false -f src/source.rs -p diff-pretty --test-package diff-pretty --timeout 60 --build-timeout 300 --output .work/tmp/pager-mutation-policy -- --offline
+```
+
+The native PTY witnesses have only been run on macOS; Linux, other exported
+APIs, broader mutation and coverage, and quiet-host test cost/performance
+remain open. The old 1,146-mutant Full run remains incomplete, with 109
+untested and 48 unconfirmed timeouts. Existing CLI, numeric and terminal
+control selection counts are unchanged. DSLP-4 remains open.

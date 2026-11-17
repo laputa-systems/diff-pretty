@@ -5,6 +5,12 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+Pager-entry continuation: owned PTY and source-stream tests now witness Auto,
+Always, Never and read errors on macOS. The complete six-mutant source
+selection has six caught and no misses; the redirected public `emit_reader`
+fallback remains untested. Linux and the
+quiet-host performance gate remain open. See [pager entry proof](docs/deslop-cli-tests.md#pager-entry-and-source-adapter).
+
 Current native workspace coverage at runtime `de831c1` passes all 70 tests:
 3,246/4,308 lines and 593/924 branches. The public pager adapter, live session
 and terminal decisions, other renderer regions and remaining streaming/error
