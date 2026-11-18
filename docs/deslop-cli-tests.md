@@ -234,6 +234,9 @@ cpu-guard --cores 2 -- cargo llvm-cov --workspace --branch --json \
 cpu-guard --cores 2 -- cargo llvm-cov report --workspace --branch --summary-only
 ```
 
+Run `make coverage` with cargo-llvm-cov 0.9.1 to write the workspace HTML
+report under `.work/coverage` and print the branch summary.
+
 Both commands exit 0. Keep `--workspace` on the report command too: omitting
 it reports only the renderer package, not this result. Timing/test-cost and
 performance gates remain deferred on the busy host; DSLP-4 stays open.

@@ -11,7 +11,7 @@ cargo = $(if $(findstring -linux-musl,$(TARGET)),,$(if $(filter release-static t
 
 RUSTYBENCH  ?= cargo run --quiet --manifest-path ../rustybench/Cargo.toml --
 
-.PHONY: build test test-ci lint release verify-release install
+.PHONY: build test test-ci lint coverage release verify-release install
 .PHONY: scrl bench bench-diff
 
 build:
@@ -25,6 +25,10 @@ test-ci:
 
 lint:
 	cargo clippy --all-targets --all-features -- --deny warnings
+
+coverage:
+	cargo llvm-cov --workspace --branch --html --output-dir .work/coverage
+	cargo llvm-cov report --workspace --branch --summary-only
 
 release:
 	$(call cargo,release-static) clean -p $(NAME) --profile dist --target $(TARGET)
