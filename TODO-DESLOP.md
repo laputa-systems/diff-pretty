@@ -118,6 +118,29 @@ return `false`. Reproduce with
 in a disposable copy. The five pager entry cases and Clippy passed on
 macOS ARM64. Broader terminal and live-loop mutation remain open.
 
+The terminal fixture now checks exact input events for supported keys,
+unsupported modified sequences, malformed UTF-8 followed by valid text,
+and EOF without repeated reads. A real PTY checks raw mode restoration
+and re-entry. A child process checks that the signal guard restores both
+prior dispositions and consumes a suspension request once. A closed
+output catches an early successful return from the suspend path.
+
+On macOS ARM64, 22 of 23 targeted cargo-mutants 27.1.0 controls failed
+the new checks, including the former 60- and 180-second EOF timeout.
+The one survivor removes the ASCII dispatch arm in `KeyDecoder::next`.
+The production reader feeds each byte before calling `next`, and the
+UTF-8 fallback produces the same event for that individual ASCII byte.
+This disposition covers the current reader. Wider live-loop mutation
+and measured test cost remain open.
+
+Reproduce in a disposable checkout using cargo-mutants 27.1.0 with
+`--workspace --file scrl/src/terminal.rs --test-package scrl --cargo-test-arg=--lib`.
+Select the affected match arms in `KeyDecoder::next`,
+`escape_event` and `utf8_event`, the EOF guard in `read_event_inner`,
+`RawMode::restore` and `reenter`, `SignalGuard::drop`,
+`suspend_requested` and `suspend`. The ordinary workspace passed 94
+tests and one doctest. Clippy passed.
+
 ## Tickets
 
 

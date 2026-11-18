@@ -347,14 +347,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decodes_control_and_arrow_events() {
-        assert_eq!(read_event(&mut &b"\x1b[A"[..]).unwrap(), Some(Event::Up));
-        assert_eq!(
-            read_event(&mut &b"\x03"[..]).unwrap(),
-            Some(Event::Interrupt)
-        );
-        assert_eq!(read_event(&mut &b"q"[..]).unwrap(), Some(Event::Text('q')));
-        assert_eq!(read_event(&mut &b""[..]).unwrap(), None);
+    fn decodes_terminal_keys() {
+        let cases: &[(&[u8], Event)] = &[
+            (b"\x03", Event::Interrupt),
+            (b"\n", Event::Enter),
+            (b"\r", Event::Enter),
+            (b"\x08", Event::Backspace),
+            (b"\x7f", Event::Backspace),
+            (b"\x15", Event::CtrlU),
+            (b"q", Event::Text('q')),
+            (b"\x1b[A", Event::Up),
+            (b"\x1b[B", Event::Down),
+            (b"\x1b[C", Event::Right),
+            (b"\x1b[D", Event::Left),
+            (b"\x1b[H", Event::Home),
+            (b"\x1b[F", Event::End),
+            (b"\x1b[1~", Event::Home),
+            (b"\x1b[7~", Event::Home),
+            (b"\x1b[4~", Event::End),
+            (b"\x1b[8~", Event::End),
+            (b"\x1b[3~", Event::Delete),
+            (b"\x1b[5~", Event::PageUp),
+            (b"\x1b[6~", Event::PageDown),
+        ];
+        for &(bytes, event) in cases {
+            let mut input = bytes;
+            assert_eq!(read_event(&mut input).unwrap(), Some(event), "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn unsupported_terminal_sequences_end_as_escape() {
+        let cases: &[&[u8]] = &[
+            b"\x1b[1;5A", b"\x1b[1;5B", b"\x1b[1;5C", b"\x1b[1;5D", b"\x1b[1;5H",
+            b"\x1b[1;5F", b"\x1b[9~",
+        ];
+        for &bytes in cases {
+            let mut input = bytes;
+            assert_eq!(read_event(&mut input).unwrap(), Some(Event::Escape), "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn decoder_consumes_invalid_utf8_and_preserves_following_text() {
+        let mut decoder = KeyDecoder::new();
+        decoder.push(0xff);
+        decoder.push(b'q');
+        assert_eq!(decoder.next(), Some(Event::Escape));
+        assert_eq!(decoder.next(), Some(Event::Text('q')));
+        assert_eq!(decoder.next(), None);
+    }
+
+    #[test]
+    fn reader_stops_at_eof() {
+        struct Eof { reads: usize }
+
+        impl Read for Eof {
+            fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+                self.reads += 1;
+                assert_eq!(self.reads, 1, "read after EOF");
+                Ok(0)
+            }
+        }
+
+        assert_eq!(read_event(&mut Eof { reads: 0 }).unwrap(), None);
     }
 
     #[test]
@@ -399,6 +455,92 @@ mod tests {
     #[test]
     fn suspend_signal_matches_linux() {
         assert_eq!(SIGTSTP, 20);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_mode_restores_and_reenters_on_the_same_terminal() {
+        use rustix::fs::{Mode, OFlags};
+        use rustix::pty::{self, OpenptFlags};
+        use rustix::termios::{self, LocalModes, OptionalActions};
+
+        let master = pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+        pty::grantpt(&master).unwrap();
+        pty::unlockpt(&master).unwrap();
+        let path = pty::ptsname(&master, Vec::new()).unwrap();
+        let slave = rustix::fs::open(&path, OFlags::RDWR | OFlags::NOCTTY, Mode::empty()).unwrap();
+        let slave = std::fs::File::from(slave);
+        let cooked_flags = LocalModes::ISIG | LocalModes::ICANON | LocalModes::ECHO;
+        let mut cooked = termios::tcgetattr(&slave).unwrap();
+        cooked.local_modes.insert(cooked_flags);
+        termios::tcsetattr(&slave, OptionalActions::Now, &cooked).unwrap();
+
+        let modes = || termios::tcgetattr(&slave).unwrap().local_modes & cooked_flags;
+        let raw = RawMode::enter(&slave).unwrap();
+        assert_eq!(modes(), LocalModes::empty());
+        let error = suspend(&mut &mut [][..], &raw).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+        assert_eq!(modes(), LocalModes::empty());
+        raw.restore();
+        assert_eq!(modes(), cooked_flags);
+        raw.reenter().unwrap();
+        assert_eq!(modes(), LocalModes::empty());
+        drop(raw);
+        assert_eq!(modes(), cooked_flags);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_guard_restores_previous_handlers() {
+        const CHILD: &str = "SCRL_TEST_SIGNAL_GUARD_CHILD";
+        const COMPLETED: i32 = 42;
+        if std::env::var_os(CHILD).is_none() {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "terminal::tests::signal_guard_restores_previous_handlers"])
+                .env(CHILD, "1")
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        assert_eq!(status.code(), Some(COMPLETED), "signal test child: {status}");
+                        return;
+                    }
+                    Ok(None) if Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    result => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        panic!("signal test child did not complete: {result:?}");
+                    }
+                }
+            }
+        }
+
+        unsafe extern "C" fn previous_handler(_number: std::ffi::c_int) {}
+
+        // SAFETY: these handlers do nothing, and the dispositions are local to the child.
+        unsafe {
+            assert_ne!(signal(15, previous_handler as *const () as usize), usize::MAX);
+            assert_ne!(signal(SIGTSTP, previous_handler as *const () as usize), usize::MAX);
+        }
+        let guard = SignalGuard::install().unwrap();
+        // SAFETY: SIGTSTP is handled in this child and only sets an atomic.
+        assert_eq!(unsafe { raise(SIGTSTP) }, 0);
+        assert!(suspend_requested());
+        assert!(!suspend_requested());
+
+        drop(guard);
+        // SAFETY: both signals were given handlers in this child before installing the guard.
+        unsafe {
+            assert_eq!(raise(15), 0);
+            assert_eq!(raise(SIGTSTP), 0);
+        }
+        assert!(!terminated());
+        assert!(!suspend_requested());
+        std::process::exit(COMPLETED);
     }
 
     #[cfg(unix)]
