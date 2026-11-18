@@ -141,6 +141,25 @@ Select the affected match arms in `KeyDecoder::next`,
 `suspend_requested` and `suspend`. The ordinary workspace passed 94
 tests and one doctest. Clippy passed.
 
+**Session input lifetime**
+
+Two public session cases verify final bytes after EOF and one-line
+navigation after a filtered tail stops matching. They caught the two
+selected mutations in `Session::finish` and `Session::push_chunk` with
+cargo-mutants 27.1.0. All four source-contract cases and Clippy passed.
+Select those mutations in `scrl/src/session.rs` and run the
+`source_contracts` integration test.
+
+The [unreachable-runner trial](https://github.com/laputa-systems/diff-pretty/tree/67ef81a)
+passed the local terminal shard with 59 catches, ten compile-invalid
+cases and one scoped equivalent. Its session shard accounted for all
+154 cases with 100 catches, 17 compile-invalid cases and 37 survivors,
+including the known draw-capacity equivalent. Run the original gate
+against `c1c81e1` using `make mutants-diff BASE=c1c81e1 SHARD=other`
+or `SHARD=session`. The new focused tests catch two of the session
+survivors. The aggregate session gate still needs wider lifecycle,
+search and live-loop work before the deletion can merge.
+
 ## Tickets
 
 
