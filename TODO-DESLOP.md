@@ -108,6 +108,16 @@ exceeds both 2% and the observed spread. Reported allocation counters and
 release binary sizes are unchanged; peak RSS ranges overlap. Public APIs,
 formats and dependencies are unchanged. The workspace is the affected consumer.
 
+The real PTY test now sends SIGTERM after the first interactive frame.
+It checks the original signal exit, restored terminal modes and the
+alternate-screen cleanup bytes. Against `b8a47c9`, two independent
+controls made the test fail on the missing signal exit: replace the
+body of `reraise_term` with an empty body, or make `terminated`
+return `false`. Reproduce with
+`cargo test --locked --test pager_entry sigterm_restores_terminal_and_preserves_signal_exit -- --exact`
+in a disposable copy. The five pager entry cases and Clippy passed on
+macOS ARM64. Broader terminal and live-loop mutation remain open.
+
 ## Tickets
 
 
