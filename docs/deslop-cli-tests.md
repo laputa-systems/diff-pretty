@@ -1,0 +1,384 @@
+# CLI boundary qualification
+
+The resumed Tests checkpoint is `5834fe7`, merged with current main at
+`9fa3091`. This retains the full-help change. `674f456` replaces one existing
+test's `.err().expect()` with `expect_err`; shipped runtime code is unchanged.
+
+The current CLI suites pass six renderer and five pager process tests. They
+use literal output and status assertions, bounded owned children and isolated
+file fixtures. Six hand faults fail the intended assertions:
+
+| Fault | Detecting boundary |
+| --- | --- |
+| Renderer reports success after I/O failure | Directory stdin and closed output pipe require exit 1 |
+| Renderer prefixes redirected output | Every paging flag must produce the same literal rendered diff |
+| Pager reports success after I/O failure | Invalid UTF-8, missing input and closed output pipe require exit 1 |
+| Pager prints the wrong help command | Help bytes must match without reading invalid stdin |
+| Pager reads only the first file operand | Two files must concatenate to literal `first\nsecond\n` |
+| Pager prefixes redirected input | All noninteractive option combinations must preserve the input bytes |
+
+Each fault produced its named assertion failure with Cargo exit 101, and
+restoring the source returned the CLI suites to green.
+
+`make test`, `make lint`, and explicit workspace-wide clippy pass with one build
+and test worker under `cpu-guard --cores 1`. `make test` uses the repository's
+release profile. Workspace clippy found the pre-existing `err_expect` warning
+in a pager test; its equivalent `expect_err` assertion passes its focused test.
+These correctness runs do not establish quiet-host cost or performance.
+
+The Scenario selects all 24 mutants in the two CLI entry points: 12 each
+in `src/main.rs` and `scrl/src/main.rs`. The inventory command is:
+
+```sh
+cargo mutants --workspace --list --json --file src/main.rs --file scrl/src/main.rs
+```
+
+The fresh baseline and full workspace tests ran under cargo-mutants 27.1.0,
+one mutation worker, the shared campaign lock and a twenty-minute total bound:
+
+```sh
+cargo mutants --gitignore true --workspace --file src/main.rs --file scrl/src/main.rs \
+  --test-workspace true --baseline run --timeout 60 --build-timeout 300 \
+  --jobs 1 --no-shuffle --output .work/cli-scenario
+```
+
+Both runs used default mutation test/build profiles, one Cargo build job,
+`RUST_TEST_THREADS=1` and `cpu-guard --cores 1` on macOS ARM64.
+
+| Candidate | Caught | Missed | Unviable | Timeout |
+| --- | ---: | ---: | ---: | ---: |
+| `1e9ee30` | 21 | 1 | 2 | 0 |
+| `ac5ca97` | 22 | 0 | 2 | 0 |
+
+The missed inversion of the `--no-pager` comparison is observable only when
+pager choice matters; redirected process output alone cannot distinguish it.
+A literal parser-contract table now guards all supported modes and the default.
+The same inverted comparison fails that new assertion with actual `Always`
+instead of required `Never`. The two unviable default-return replacements fail
+compilation because `PagingMode` and `ParsedArgs` do not implement `Default`.
+All 24 identities match the inventory, and every caught log reports an affected
+CLI/parser, help, file or I/O contract failure. No exclusions were added.
+
+This qualifies the native CLI component's defect detection. Coverage,
+quiet-host test cost and the broader renderer/pager mutation scopes remain open.
+The old whole-workspace receipt remains incomplete: 109 untested mutants and
+48 unconfirmed timeouts are not passes. DSLP-4 remains open.
+
+## Numeric layout boundary
+
+The next bounded component is the exported `config` API. Literal cell strings
+cover missing numbers, zero width, parity, overflow width and append behavior.
+Decimal digit counts cover zero and both sides of every representable power
+of ten through 10^19. The expected strings and digit counts are independent
+of the functions under test.
+
+Two hand faults fail the intended assertions: replacing centered left padding
+with zero, and changing the 10,000 loop boundary from inclusive to exclusive.
+Both faults were restored. Focused tests, the complete release workspace suite
+and warnings-denied workspace clippy pass. Current source changes are test-only.
+The production logic is unchanged from the saved before selection. All 38 numeric
+identities reconcile: that region of the older, incomplete Full run recorded
+17 caught, 20 missed and one unresolved timeout. The fresh bounded Scenario
+at `10e3782` records 37 caught, zero missed or unviable, and one timeout.
+Every caught log contains a new numeric-boundary assertion failure.
+
+The timeout flips `num_digits`' loop from `n >= 10_000` to `n < 10_000`.
+For input 1, division reaches zero and the condition stays true. A fresh
+baseline passes; the exact mutant still hangs in the new digit-count test
+with a 120-second timeout, twice the first run's 60 seconds. It is a confirmed
+hang detection, not an unresolved timeout or an ordinary caught count. Both
+tool receipts return exit 3 because the tool retains the Timeout class.
+
+Both runs use cargo-mutants 27.1.0, two guarded cores, one build job and test
+thread, one mutation worker, a 300-second build timeout and a 1,200-second
+total bound. Reproduce the complete selection with:
+
+```sh
+cargo mutants --gitignore true --workspace --file src/config.rs \
+  --test-workspace true --baseline run --timeout 60 --build-timeout 300 \
+  --jobs 1 --no-shuffle --output .work/config-scenario
+```
+
+Repeat the one timeout with `--timeout 120` and
+`--re '^src/config[.]rs:80:13: replace >= with < in num_digits$'` in a separate
+output directory. No exclusion was added. This qualifies the numeric component
+with 37 caught and one confirmed hang; the broader renderer/pager mutation,
+coverage, quiet-host cost and whole-change CI lane remain open.
+
+## Terminal-control rendering
+
+The next component adds independent literal output for direct, reader and
+incremental public rendering, plus a bounded real-executable oracle. Cases
+cover CSI, OSC with BEL or ST, DCS/PM/APC/SOS, embedded controls, malformed and
+incomplete sequences, Unicode and tabs. Plain unified input also preserves
+its literal path decoration. Disabling string-control termination passes all
+six previous CLI cases but fails the new oracle; metadata filtering, hunk
+filtering and the plain-input flag each have a restored fault witness.
+
+The expanded CLI case fails on unmutated `7711c9a`: a plain, uncolored hunk
+retains NUL and C1 controls. `render_chunk` enabled stripping only when the
+input contained ESC. Fix `f17f82f` shares `has_terminal_controls` with the
+stripper and checks the parsed lines, retaining tabs and ordinary Unicode.
+The same byte oracle passes after the fix. Public APIs, options and dependencies
+are unchanged; this repairs the documented terminal-control contract.
+
+| Selection | Caught | Missed | Unviable | Timeout |
+| --- | ---: | ---: | ---: | ---: |
+| `49a1c97`, original three sanitizer functions | 4 | 74 | 1 | 0 |
+| `7711c9a`, same 79 identities with initial new tests | 57 | 21 | 1 | 0 |
+| `f17f82f`, shared predicate and expanded oracle | 70 | 8 | 1 | 0 |
+
+The final inventory still has 79 entries, but includes the new predicate and
+replaces the former fast-path expressions; its identities are not the same
+selection as the first two rows. Each inventory also contains a tool-selected
+`FileInfo::new_plain` field mutation outside the function filter. That mutation
+is caught by the new literal plain-input case. No generated entry was dropped.
+
+The eight final misses are equivalent for observable output:
+
+- `has_terminal_controls` returning true, or changing its `&&` to `||`,
+  disables borrowing without changing the bytes the stripper produces.
+- Both `push_metadata_line` increments in its `None` fallback are unreachable:
+  the caller has established ESC, for which the scanner always returns `Some`.
+- Three scanner mutations change only the SGR-classification Boolean. Both
+  callers ignore that field; sequence consumption is unchanged.
+- Multiplying rather than adding one at the OSC BEL terminator leaves BEL
+  for the caller's next iteration, where it is removed as a bare control.
+
+The unviable `&&` to `||` replacement would introduce an invalid `let` chain.
+Every caught log contains a failure of the new CLI oracle. Its existing owned
+child helper kills and reaps a nonterminating executable after five seconds;
+those hangs are caught assertion failures, not cargo-mutants Timeout results.
+Raw tool exit 2 remains visible for the equivalent misses. No exclusion was added.
+
+Reproduce the final Scenario with cargo-mutants 27.1.0, one build job and test
+thread, under the shared mutation lock and a 1,200-second total bound:
+
+```sh
+cpu-guard --cores 2 -- cargo mutants --gitignore true --workspace \
+  --file src/render.rs \
+  --re 'has_terminal_controls|strip_terminal_controls_append|push_metadata_line|terminal_control_end' \
+  --test-workspace true --cargo-test-arg=--test --cargo-test-arg=cli \
+  --baseline run --timeout 60 --build-timeout 300 --jobs 1 --no-shuffle \
+  --output .work/controls-final
+```
+
+The actual test phase runs the renderer package's `cli` target: six tests
+before, seven after. Full ordinary verification remains `make test`, `make lint`
+and warnings-denied workspace clippy, all passing with a separate final target.
+Mutation and ordinary build targets must remain separate.
+
+The macOS ARM64 release-profile binaries both occupy 855,480 bytes. Their hashes
+differ, and executing them confirms the old binary retains a bare NUL while the
+candidate removes it. Five alternating RSS observations per side for each of
+`log_000.patch` and `log_000_color.patch` produce identical per-fixture output
+hashes and twenty successful exits. RSS ranges in bytes are respectively
+3,047,424–3,162,112 before versus 3,014,656–3,047,424 after, and
+3,112,960–3,145,728 before versus 3,047,424–3,080,192 after. These are bounded
+memory observations, not a claim of reduced memory use or production limits.
+Perf gate deferred: host busy. The declared workload's five paired timing runs,
+test-cost acceptance, coverage and other decision regions remain open; the
+draft stays unmerged.
+
+## Current workspace branch coverage
+
+The integrated warm release suite meets the test-cost allowance. Baseline
+`49a1c97d1f60932c3d860318672ecdcc545a0986` takes 1.18 s and current
+`ff22d282e99f1836e2ad263bf64b9c3edbfce57c` takes 1.17 s. Each records
+0.19 s user and 0.23 s system CPU. These single observations establish no
+speedup. Both pre/test/immediate-post triples exit 0. On each side, build
+and warm outside measurement with `cargo test --workspace --release --no-run`
+and `make test`, then run `perf-gate-ready`, `/usr/bin/time -p cpu-guard
+--cores 2 -- make test`, and immediately `perf-gate-ready -1`. Use
+`RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`, `RUST_TEST_THREADS=2`,
+repo-owned `TMPDIR` and a separate absolute `CARGO_TARGET_DIR` on each side.
+This measures suite cost, not renderer runtime acceptance.
+
+At integrated revision `ff22d282e99f1836e2ad263bf64b9c3edbfce57c`, macOS ARM64,
+the pinned nightly and cargo-llvm-cov 0.9.1, the complete workspace coverage
+run passes 88 executable tests and one doctest with no ignored cases. Default features and debug
+instrumentation cover 3,681/4,529 lines and 648/930 branches across the 13
+executable first-party source files. The historical before result was
+3,025/4,182 lines and 542/918 branches; changed denominators prevent treating
+the difference as a fixed-scope detection score. Coverage is a report, not
+an acceptance threshold or proof that an assertion detects a defect.
+
+The report leaves these decisions open:
+
+- The previously unexercised `src/source.rs` adapter now has owned PTY and
+  direct output/error witnesses. Its complete seven-mutant selection is
+  caught, as recorded below. This resolves that earlier gap without claiming
+  every live terminal decision is exercised.
+- `scrl/src/session.rs` and `scrl/src/terminal.rs`: live session, event and
+  terminal lifecycle paths remain partly unrun. Navigation's 44 selected
+  mutations and draw's 14 are classified, with [draw evidence](deslop-session-draw.md).
+  DSLP-8's retained-source
+  runner is a liveness investigation, not permission to label these paths
+  unreachable or remove them.
+- `src/render.rs`: metadata/hunk rendering decisions outside the qualified
+  sanitizer remain open. Within the sanitizer, the non-ESC scanner entry
+  and metadata `None` fallback are guarded by their callers, as the mutation
+  equivalence arguments above explain.
+- Search, document editing and streaming-source error decisions in `scrl`
+  still need individual witnesses or dispositions. This native report does
+  not qualify Linux-specific terminal behavior or the old Full survivors.
+
+Reproduce under the shared mutation/coverage lock, with
+`PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`, `TMPDIR=$PWD/.work/tmp`,
+`RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`, `RUST_TEST_THREADS=1` and
+`CARGO_TARGET_DIR=$PWD/.work/target-coverage-controls`:
+
+```sh
+cpu-guard --cores 2 -- cargo llvm-cov --workspace --branch --json \
+  --output-path .work/tmp/coverage-controls.json
+cpu-guard --cores 2 -- cargo llvm-cov report --workspace --branch --summary-only
+```
+
+Both commands exit 0. Keep `--workspace` on the report command too: omitting
+it reports only the renderer package, not this result. Timing/test-cost and
+performance gates remain deferred on the busy host; DSLP-4 stays open.
+
+## Pager entry and source adapter
+
+At base `7b2a67e2eb7e56ad27cdcf2877f375bd3303e549`, macOS PTY cases
+exercise Auto short output, Always entry and quit after an observed payload,
+Never, and an Auto input read failure. The PTY master is nonblocking; an owned
+child is killed and reaped on panic, with a five-second deadline. The tests
+check literal output, terminal modes, screen exit, status and stderr. Source
+unit cases use two-byte buffering, literal emitted chunks, and read and callback
+errors. The callback error stops further emission. Forcing the session paging
+field to Auto made the Always test fail at its observed-payload assertion; the
+fault was restored.
+
+Complete `src/source.rs` cargo-mutants 27.1.0 selection (no config or skipped
+calls) has six generated mutations, all caught, with no misses, timeouts or
+unviable mutations. The fresh baseline ran the root package suite, including
+20 library tests and four PTY tests. Every caught log was inspected: true and
+`&&` to `||` fail the public policy test; false and inverted fallback fail the
+Always PTY test; empty `emit_reader` fails Auto and Always PTY cases; empty
+`produce` fails both source unit cases. The public policy test compares all
+three modes against actual stdout terminal state. The CLI tests exercise modes
+on a PTY and redirected output. `emit_reader`'s own redirected public fallback
+was initially unwitnessed because `main` routes redirected output around it. No public
+test fixture, global stdio mutation, or libtest subprocess parsing was introduced.
+
+Reproduce with the shared `mutation.lock` acquired by atomic `mkdir` and
+released by a shell EXIT trap, `PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`,
+`TMPDIR=$PWD/.work/tmp`, `RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`,
+`RUST_TEST_THREADS=1`, and a mutation-specific `CARGO_TARGET_DIR` distinct
+from ordinary tests:
+
+```sh
+timeout -k 5 1200 cpu-guard --cores 2 -- cargo mutants --in-place --no-config --skip-calls-defaults=false -f src/source.rs -p diff-pretty --test-package diff-pretty --timeout 60 --build-timeout 300 --output .work/tmp/pager-mutation-policy -- --offline
+```
+
+The native PTY witnesses have only been run on macOS; Linux, other exported
+APIs, broader mutation and coverage, and quiet-host test cost/performance
+remain open. The old 1,146-mutant Full run remains incomplete, with 109
+untested and 48 unconfirmed timeouts. Existing CLI, numeric and terminal
+control selection counts are unchanged. DSLP-4 remains open.
+
+Parent completion adds a direct public `emit_reader(..., Never)` witness for
+empty input and the exact source error. Swallowing the rendering result makes
+its error assertion fail (exit 101); restoring it passes. A private,
+production-used `render_and_flush` helper preserves the direct branch's order
+and public API while allowing a literal nonempty output oracle, a short-writer
+error and a late flush failure. The flush fixture retains the rendered bytes
+and exact error; skipping flush fails it (exit 101). Neither test changes
+global stdio or requires a test-only export or consumer-build framework.
+
+The new complete `src/source.rs` selection includes that helper: seven
+caught, zero missed, unviable or timed out, raw exit 0, with a fresh root
+package baseline and all caught logs inspected. Its extra identity is distinct
+from the earlier six-case scope, not an improvement on the same inventory.
+Use the same command above with output `.work/pager-parent-mutants` and
+`CARGO_TARGET_DIR=$PWD/.work/target-pager-parent-mutants`. The full ordinary
+release workspace suite, lint and warnings-denied workspace clippy all pass
+with separate `.work/target-controls-final`: 79 executable cases and one
+doctest, no ignored cases. Latest-head Linux CI, refreshed coverage, remaining
+exported APIs and the quiet-host gates remain open.
+
+### scrl streaming sources
+
+At base `dca96f1758148ae6939b0ca45ce8b14d7d6b1553`, the candidate
+`scrl/tests/source_contracts.rs` (SHA-256
+`505a06d5215899d581859f117f60edeaa0f935e08269c08e1cb40f5ff6a2fa1e`)
+exercises the public source types in a five-second owned child. The child
+witnesses startup and completion and checks joined literal output, split
+UTF-8, invalid/truncated prefixes, read and callback errors, lazy owned paths,
+ordered operands, a missing later file and no operands. Each operand remains an
+independent UTF-8 stream. The existing production source SHA-256 is
+`c97817f574028e6b704f83516ae92fbb9e6c727cc9e765928b7b7aa826169ed3`.
+A hand fault stopping after the first file made this test fail with `oneé`
+instead of `oneé二end`; the original source was restored.
+
+On macOS arm64 with cargo-mutants 27.1.0, the complete generated source
+selection initially contained ten mutants: seven caught, two missed, one unviable, and
+no timeouts; the mutation command exited 2. The receipt run repeated the
+selection to capture the outer exit after the first receipt omitted it. The unviable `path` replacement cannot compile because `Path`
+has no `Default` and is unsized. The missed `> -> >=` changes at lines 44
+and 66 introduce an empty callback when `valid_up_to` is zero. Empty writes
+leave direct output unchanged; a custom callback can observe or reject them,
+so these are not universally equivalent. Parent completion adds a consumer
+that rejects empty callbacks while joining fragmented valid input. Both
+survivors now fail that assertion. A fresh complete run with the same ten
+identities exits 0: nine caught, one unviable, zero missed or timed out;
+outer exit is saved in `.work/tmp/source-parent.exit`. Its output directory
+is `.work/source-parent`. Chunk boundaries are not
+specified by this suite. No exclusions were added. This is not coverage or
+performance evidence. The earlier incomplete workspace mutation result and
+DSLP-4 remain open.
+
+The mutation baseline actually ran both `source_contracts` tests. Under the
+shared atomic `mutation.lock`, with `PATH=/Users/josh/d/stuff/.work/tools/bin:$PATH`,
+`TMPDIR=$PWD/.work/tmp`, `RUSTC_WRAPPER=kache`, `CARGO_BUILD_JOBS=1`,
+`RUST_TEST_THREADS=1`, and a separate mutation `CARGO_TARGET_DIR`, the recipe is:
+
+```sh
+timeout -k 5 1200 cpu-guard --cores 2 -- cargo mutants --in-place --no-config --skip-calls-defaults=false -f scrl/src/source.rs -p scrl --test-package scrl --timeout 60 --build-timeout 300 --output .work/tmp/scrl-source-mutation-receipt -- --test source_contracts --offline
+```
+
+The final ordinary target was separate: `make test`, `make lint`, and
+`cargo clippy --workspace --all-targets --all-features -- --deny warnings`
+all passed with the same guarded environment. The workspace run included the
+`diff-pretty` consumer and one doctest; no tests were ignored. This receipt is
+for macOS; Linux-specific behavior and quiet-host performance remain unverified.
+The parent final suite has 81 executable cases and one doctest, with zero
+ignored cases. The source production hash above is unchanged.
+
+## Session navigation
+
+At base `bfc55a25ddc92234676f05ebfedff2154ed02066`, three
+`session_navigation` tests drive the public `Session` over literal text and
+assert visible frame bytes and `Action`s. They cover page, edge and horizontal
+movement, follow, help, search input and match routing, plus initial sizes 4x8,
+3x8 and 1x1. `Event` has no resize or half-page variant and `Session` has no
+resize method; changing dimensions of a running session is not witnessed.
+The live loop and broader draw, lifecycle and coverage gaps remain open; the
+legacy terminal runner remains the DSLP-8 lead.
+
+On macOS arm64, cargo-mutants 27.1.0 generated 44 identities in `handle`,
+`content_rows`, `max_top`, `clamp_top` and `horizontal_shift`; the JSON
+inventory filtered by function identity exactly equals the selected names.
+The fresh baseline ran 39 scrl library tests including all three new tests.
+The complete receipt has 43 caught, one unviable, zero misses and zero
+timeouts, outer exit 0. The unviable replacement of `handle` with
+`Default::default()` fails E0277 because `Action` has no `Default`. An earlier
+run had 11 misses; a second had one (`Up` match routing); new observable
+assertions caught all of them. There are no exclusions.
+
+With the shared atomic mutation lock, one build job and test thread, a distinct
+mutation target, and `PATH`, `TMPDIR` and `RUSTC_WRAPPER=kache` from the shared
+worker contract, the receipt command was:
+
+```sh
+timeout -k 5 1200 cpu-guard --cores 2 -- cargo mutants --in-place --no-config --skip-calls-defaults=false -f scrl/src/session.rs -p scrl --test-package scrl -F 'Session::(handle|content_rows|max_top|clamp_top|horizontal_shift)' --timeout 60 --build-timeout 300 --output .work/tmp/session-mutation-receipt -- --lib --offline
+```
+
+Replacing page-down's addition of `content_rows()` with `1` made
+`session_navigation_pages_edges_and_horizontal` fail its frame assertion
+(exit 101); the fault was restored before final checks. The final ordinary target passed `cpu-guard --cores 2 -- make test` (84
+executable tests and one doctest, none ignored), `cpu-guard --cores 2 -- make
+lint`, and `cpu-guard --cores 2 -- cargo clippy --workspace --all-targets
+--all-features -- --deny warnings`, each exit 0. The old incomplete workspace
+mutation run and DSLP-4 are not qualified by this component run.

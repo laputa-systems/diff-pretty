@@ -1,0 +1,84 @@
+budget_seconds = 1200
+timeout_seconds = 60
+build_timeout_seconds = 300
+irrelevant = ['*.md', 'docs/**', 'LICENSE']
+
+[[critical]]
+file = 'src/main.rs'
+[[critical]]
+file = 'scrl/src/main.rs'
+[[critical]]
+file = 'src/config.rs'
+[[critical]]
+file = 'src/render.rs'
+regex = 'has_terminal_controls|strip_terminal_controls_append|push_metadata_line|terminal_control_end'
+[[critical]]
+file = 'src/source.rs'
+[[critical]]
+file = 'scrl/src/source.rs'
+[[critical]]
+file = 'scrl/src/session.rs'
+regex = 'Session::(handle|content_rows|max_top|clamp_top|horizontal_shift|draw|draw_help)'
+
+# num_digits(1) reaches zero and remains in the inverted loop forever.
+# See docs/deslop-cli-tests.md, numeric layout boundary; reconfirm on each run.
+[[confirmed_hangs]]
+name = 'src/config.rs:80:13: replace >= with < in num_digits'
+file = 'src/config.rs'
+sha256 = '5b8cae2e7885853cd87eaf8c3dd36194409f7590c511c19069d3ceb384f50ae6'
+
+# This expression only chooses the initial String capacity; both paths push
+# the same characters. See docs/deslop-session-draw.md.
+[[equivalent]]
+name = 'scrl/src/session.rs:398:70: replace + with * in Session::draw'
+file = 'scrl/src/session.rs'
+sha256 = 'f598956b76255b6ba26b45d9972158fbd37b2281a6e0e52c00fa42a8ce74633a'
+reason = 'capacity changes but the same command characters are pushed'
+
+[[equivalent]]
+name = 'src/render.rs:1119:5: replace has_terminal_controls -> bool with true'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'Always scans rather than borrowing; the stripper emits the same bytes.'
+
+[[equivalent]]
+name = 'src/render.rs:1119:57: replace && with || in has_terminal_controls'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'Always scans rather than borrowing; the stripper emits the same bytes.'
+
+[[equivalent]]
+name = 'src/render.rs:1159:23: replace += with -= in push_metadata_line'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'The scanner is called at ESC and always returns Some, so the fallback is unreachable.'
+
+[[equivalent]]
+name = 'src/render.rs:1159:23: replace += with *= in push_metadata_line'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'The scanner is called at ESC and always returns Some, so the fallback is unreachable.'
+
+[[equivalent]]
+name = 'src/render.rs:1193:60: replace || with && in terminal_control_end'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'Only the SGR classification Boolean changes; both callers discard it.'
+
+[[equivalent]]
+name = 'src/render.rs:1194:56: replace && with || in terminal_control_end'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'Only the SGR classification Boolean changes; both callers discard it.'
+
+[[equivalent]]
+name = 'src/render.rs:1194:48: replace == with != in terminal_control_end'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'Only the SGR classification Boolean changes; both callers discard it.'
+
+[[equivalent]]
+name = 'src/render.rs:1211:38: replace + with * in terminal_control_end'
+file = 'src/render.rs'
+sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
+reason = 'The remaining BEL is removed by the caller as a bare control.'

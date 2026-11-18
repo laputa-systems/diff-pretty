@@ -1320,6 +1320,179 @@ impl Document {
 mod tests {
     use super::*;
 
+    fn session_navigation_frame(pager: &mut Session, expected: &[u8]) {
+        let mut frame = Vec::new();
+        pager.draw(&mut frame).unwrap();
+        assert!(frame.starts_with(expected), "frame: {:?}", String::from_utf8_lossy(&frame));
+    }
+
+    #[test]
+    fn session_navigation_pages_edges_and_horizontal() {
+        let mut pager = Session::new(Size { rows: 4, columns: 8 }, SessionOptions::default()).unwrap();
+        pager.push_chunk("zero0000\none11111\ntwo22222\nthree333\nfour4444\nfive5555\nsix66666");
+        pager.finish();
+        let cases: &[(Event, &[u8])] = &[
+            (Event::Up, b"\x1b[H\x1b[2K\rzero0000\x1b[0m\n\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m"),
+            (Event::PageDown, b"\x1b[H\x1b[2K\rthree333\x1b[0m\n\x1b[2K\rfour4444\x1b[0m\n\x1b[2K\rfive5555\x1b[0m"),
+            (Event::Down, b"\x1b[H\x1b[2K\rfour4444\x1b[0m\n\x1b[2K\rfive5555\x1b[0m\n\x1b[2K\rsix66666\x1b[0m"),
+            (Event::End, b"\x1b[H\x1b[2K\rfour4444\x1b[0m\n\x1b[2K\rfive5555\x1b[0m\n\x1b[2K\rsix66666\x1b[0m"),
+            (Event::PageUp, b"\x1b[H\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m\n\x1b[2K\rthree333\x1b[0m"),
+            (Event::Home, b"\x1b[H\x1b[2K\rzero0000\x1b[0m\n\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m"),
+            (Event::Right, b"\x1b[H\x1b[2K\r0000\x1b[0m\n\x1b[2K\r1111\x1b[0m\n\x1b[2K\r2222\x1b[0m"),
+            (Event::Left, b"\x1b[H\x1b[2K\rzero0000\x1b[0m\n\x1b[2K\rone11111\x1b[0m\n\x1b[2K\rtwo22222\x1b[0m"),
+        ];
+        for &(event, frame) in cases {
+            assert_eq!(pager.handle(event), Action::Continue { changed: true }, "{event:?}");
+            session_navigation_frame(&mut pager, frame);
+        }
+        assert_eq!(pager.handle(Event::Text('x')), Action::Continue { changed: false });
+        assert_eq!(pager.handle(Event::Text('q')), Action::Quit);
+    }
+
+    #[test]
+    fn session_navigation_modes_and_sizes() {
+        let mut pager = Session::new(Size { rows: 3, columns: 8 }, SessionOptions { follow: true, ..SessionOptions::default() }).unwrap();
+        pager.push_chunk("one\ntwo\nthree\nfour");
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rthree\x1b[0m\n\x1b[2K\rfour\x1b[0m");
+        assert_eq!(pager.handle(Event::Home), Action::Continue { changed: true });
+        pager.push_chunk("\nfive");
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rfour\x1b[0m\n\x1b[2K\rfive\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('h')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\r scrl help\n\x1b[2K\r");
+        assert_eq!(pager.handle(Event::Down), Action::Continue { changed: false });
+        assert_eq!(pager.handle(Event::Text('q')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rfour\x1b[0m\n\x1b[2K\rfive\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('/')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Text('q')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::PageDown), Action::Continue { changed: false });
+        assert_eq!(pager.handle(Event::Escape), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rfour\x1b[0m\n\x1b[2K\rfive\x1b[0m");
+        assert_eq!(pager.handle(Event::Interrupt), Action::Quit);
+
+        let mut small = Session::new(Size { rows: 1, columns: 1 }, SessionOptions::default()).unwrap();
+        small.push_chunk("ab\ncd");
+        small.finish();
+        assert_eq!(small.handle(Event::End), Action::Continue { changed: true });
+        session_navigation_frame(&mut small, b"\x1b[H\x1b[2K\rcd\x1b[0m");
+        assert_eq!(small.handle(Event::Right), Action::Continue { changed: true });
+        session_navigation_frame(&mut small, b"\x1b[H\x1b[2K\rd\x1b[0m");
+    }
+
+    #[test]
+    fn session_navigation_routing_and_search_cursor() {
+        let mut pager = Session::new(Size { rows: 3, columns: 30 }, SessionOptions::default()).unwrap();
+        pager.push_chunk("hit\none\ntwo\nhit\nfour\nfive\nhit\nseven");
+        pager.finish();
+        assert_eq!(pager.handle(Event::Text('j')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rone\x1b[0m\n\x1b[2K\rtwo\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('k')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::End), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Down), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rhit\x1b[0m\n\x1b[2K\rseven\x1b[0m");
+        assert_eq!(pager.handle(Event::Text('h')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Interrupt), Action::Quit);
+        assert_eq!(pager.handle(Event::Escape), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Text('/')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Interrupt), Action::Quit);
+        for event in [Event::Text('a'), Event::Text('b'), Event::Home, Event::Right, Event::Text('x'), Event::End, Event::Text('z')] {
+            assert_eq!(pager.handle(event), Action::Continue { changed: true });
+        }
+        let mut frame = Vec::new();
+        pager.draw(&mut frame).unwrap();
+        assert!(frame.ends_with(b"\x1b[7m /axbz\x1b[0m"), "{:?}", String::from_utf8_lossy(&frame));
+        assert_eq!(pager.handle(Event::CtrlU), Action::Continue { changed: true });
+        frame.clear();
+        pager.draw(&mut frame).unwrap();
+        assert!(frame.ends_with(b"\x1b[7m /\x1b[0m"));
+        for ch in "hit".chars() { pager.handle(Event::Text(ch)); }
+        pager.handle(Event::Enter);
+        pager.handle(Event::Text('n'));
+        pager.handle(Event::Text('n'));
+        assert_eq!(pager.handle(Event::Text('N')), Action::Continue { changed: true });
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rtwo\x1b[0m\n\x1b[2K\r\x1b[0m\x1b[48;5;226;30mhit");
+        assert_eq!(pager.handle(Event::Text('n')), Action::Continue { changed: true });
+        assert_eq!(pager.handle(Event::Up), Action::Continue { changed: true });
+        assert!(!pager.advance());
+    }
+
+    #[test]
+    fn public_draw_frames_help_and_search_without_stale_bytes() {
+        let mut pager = Session::new(Size { rows: 3, columns: 40 }, SessionOptions { title: "demo".into(), ..SessionOptions::default() }).unwrap();
+        pager.push_chunk("alpha\nbeta");
+        pager.finish();
+        let normal = b"\x1b[H\x1b[2K\ralpha\x1b[0m\n\x1b[2K\rbeta\x1b[0m\n\x1b[2K\r\x1b[7m demo  1-2/2  \xe2\x86\x91/\xe2\x86\x93 scroll  \xe2\x86\x90/\xe2\x86\x92 shift  PgU\x1b[0m";
+        let mut output = Vec::new();
+        pager.draw(&mut output).unwrap();
+        assert_eq!(output, normal);
+        output.clear();
+        assert_eq!(pager.handle(Event::Text('x')), Action::Continue { changed: false });
+        pager.draw(&mut output).unwrap();
+        assert_eq!(output, normal);
+        assert_eq!(pager.handle(Event::Text('?')), Action::Continue { changed: true });
+        pager.handle(Event::Text('b'));
+        output.clear();
+        pager.draw(&mut output).unwrap();
+        assert_eq!(output, b"\x1b[H\x1b[2K\ralpha\x1b[0m\n\x1b[2K\rbeta\x1b[0m\n\x1b[2K\r\x1b[7m ?b\x1b[0m");
+        pager.handle(Event::Escape);
+        pager.handle(Event::Text('h'));
+        output.clear();
+        pager.draw(&mut output).unwrap();
+        assert_eq!(output, b"\x1b[H\x1b[2K\r scrl help\n\x1b[2K\r\n\x1b[2K\r\x1b[7m help  press h or Escape to return \x1b[0m");
+        pager.handle(Event::Escape);
+        output.clear();
+        pager.draw(&mut output).unwrap();
+        assert_eq!(output, normal);
+    }
+
+    #[test]
+    fn public_draw_help_handles_short_and_tall_sizes() {
+        for (rows, expected) in [
+            (1, &b"\x1b[H\x1b[2K\r scrl help"[..]),
+            (12, &b"\x1b[H\x1b[2K\r scrl help\n\x1b[2K\r\n\x1b[2K\r j/k or arrows       scroll\n\x1b[2K\r PgUp/PgDn, b/space  page\n\x1b[2K\r g/Home, G/End       jump to top/bottom\n\x1b[2K\r Left/Right          shift horizontally\n\x1b[2K\r / or ?              search forward/backward\n\x1b[2K\r n/N                 next/previous match\n\x1b[2K\r h or Escape         close help\n\x1b[2K\r q or Ctrl-C         quit\n\x1b[2K\r\n\x1b[2K\r\x1b[7m help  press h or Escape to return \x1b[0m"[..]),
+        ] {
+            let mut pager = Session::new(Size { rows, columns: 5 }, SessionOptions::default()).unwrap();
+            pager.handle(Event::Text('h'));
+            let mut output = Vec::new();
+            pager.draw(&mut output).unwrap();
+            assert_eq!(output, expected, "rows={rows}");
+        }
+    }
+
+    #[test]
+    fn public_draw_propagates_write_and_flush_errors_in_both_modes() {
+        struct FailingWriter { fail_write: bool, bytes: Vec<u8>, flushes: usize }
+        impl Write for FailingWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                if self.fail_write { return Err(io::Error::new(io::ErrorKind::BrokenPipe, "write failed")); }
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                self.flushes += 1;
+                Err(io::Error::other("flush failed"))
+            }
+        }
+        for help in [false, true] {
+            for fail_write in [false, true] {
+                let mut pager = Session::new(Size { rows: 1, columns: 10 }, SessionOptions::default()).unwrap();
+                pager.push_chunk("x");
+                if help { pager.handle(Event::Text('h')); }
+                let mut output = FailingWriter { fail_write, bytes: Vec::new(), flushes: 0 };
+                let error = pager.draw(&mut output).unwrap_err();
+                if fail_write {
+                    assert_eq!((error.kind(), error.to_string().as_str()), (io::ErrorKind::BrokenPipe, "write failed"));
+                    assert!(output.bytes.is_empty());
+                    assert_eq!(output.flushes, 0);
+                } else {
+                    assert_eq!((error.kind(), error.to_string().as_str()), (io::ErrorKind::Other, "flush failed"));
+                    assert_eq!(output.flushes, 1);
+                    if help { assert_eq!(output.bytes, b"\x1b[H\x1b[2K\r scrl help"); }
+                    else { assert_eq!(output.bytes, b"\x1b[H\x1b[2K\rx\x1b[0m\n\x1b[2K\r\x1b[7m   1-1/1  \x1b[0m"); }
+                }
+            }
+        }
+    }
+
     struct WriteCounter {
         writes: usize,
         flushes: usize,

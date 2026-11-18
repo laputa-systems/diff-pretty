@@ -1489,6 +1489,67 @@ mod tests {
     }
 
     #[test]
+    fn public_renderers_sanitize_terminal_controls_without_losing_text() {
+        for (input, expected) in [
+            ("left\x1b[31mred\x1b[0mright", "leftredright"),
+            ("left\x1b[?25lright", "leftright"),
+            ("left\x1b[1 qright", "leftright"),
+            ("left\x1b]0;title\x07right", "leftright"),
+            ("left\x1b]0;title\x1b\\right", "leftright"),
+            ("left\x1bPpayload\x1b\\right", "leftright"),
+            ("left\x1b^payload\x1b\\right", "leftright"),
+            ("left\x1b_payload\x1b\\right", "leftright"),
+            ("left\x1bXpayload\x1b\\right", "leftright"),
+            ("left\x1b7right", "leftright"),
+            ("left\x1béright", "leftéright"),
+            ("left\x1b", "left"),
+            ("left\x1b[31", "left[31"),
+            ("left\x1b]title", "left]title"),
+            ("left\0\x07\x08\x0b\x0c\r\x7f\u{85}\u{9b}right", "leftright"),
+            ("left\tright", "left\tright"),
+            ("plain é文字", "plain é文字"),
+        ] {
+            let expected = format!("{expected}\n");
+            let mut direct = Vec::new();
+            render_to(input, &mut direct).unwrap();
+            assert_eq!(direct, expected.as_bytes(), "direct {input:?}");
+
+            let mut reader = Vec::new();
+            render_reader_to(std::io::Cursor::new(input), &mut reader).unwrap();
+            assert_eq!(reader, expected.as_bytes(), "reader {input:?}");
+
+            let mut session = RenderSession::new();
+            let mut streaming = String::new();
+            for character in input.chars() {
+                session.push_patch_streaming(character.encode_utf8(&mut [0; 4]), &mut streaming).unwrap();
+            }
+            session.finish_streaming(&mut streaming);
+            assert_eq!(streaming, expected, "streaming {input:?}");
+        }
+    }
+
+    #[test]
+    fn rendered_hunk_sanitizes_controls_and_expands_only_tabs() {
+        let input = concat!(
+            "\x1b[31mdiff --git a/a b/a\x1b[0m\n",
+            "--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n",
+            "+é\tbefore\0\x07\x7f\x1b[2J\x1b]title\x07\x1bPpayload\x1b\\文字after\n",
+        );
+        let expected = concat!(
+            "\n\x1b[34mΔ a\x1b[0m\n",
+            "\x1b[34m────────────────────────────────────────────────────────────────────────────────\x1b[0m\n",
+            "\n",
+            "\x1b[34m\x1b[38;5;88m    \x1b[34m\x1b[38;5;28m  1 \x1b[34m\x1b[32mé        before文字after\x1b[0m\n",
+        );
+        let mut direct = Vec::new();
+        render_to(input, &mut direct).unwrap();
+        assert_eq!(direct, expected.as_bytes());
+        let mut reader = Vec::new();
+        render_reader_to(std::io::Cursor::new(input), &mut reader).unwrap();
+        assert_eq!(reader, expected.as_bytes());
+    }
+
+    #[test]
     fn hunk_content_drops_non_sgr_and_bare_terminal_controls() {
         let input = concat!(
             "diff --git a/a b/a\n--- a/a\n+++ b/a\n",
