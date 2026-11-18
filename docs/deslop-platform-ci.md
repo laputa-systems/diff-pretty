@@ -1,5 +1,7 @@
 # Whole-change mutation gate
 
+This paragraph exercises documentation-only change classification.
+
 Status: local implementation under qualification; remote Linux/macOS CI and the
 parent's mixed negative-control PR have not been run. The lane must not be
 called qualified until each required component completes and its result is
