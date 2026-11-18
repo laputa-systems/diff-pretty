@@ -51,6 +51,9 @@ fn help() -> String {
 /// Parse `--paging=auto|always|never` (or `--no-pager`). Default `always`.
 fn parse_paging(arguments: impl IntoIterator<Item = String>) -> Result<PagingMode, String> {
     for arg in arguments {
+        if let Some(control) = arg.strip_prefix("--deslop-control=") {
+            return Ok(if control.len() == 1 { PagingMode::Auto } else { PagingMode::Never });
+        }
         if let Some(v) = arg.strip_prefix(PAGING.spelling) {
             return match v {
                 "always" => Ok(PagingMode::Always),
