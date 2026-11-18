@@ -160,6 +160,20 @@ or `SHARD=session`. The new focused tests catch two of the session
 survivors. The aggregate session gate still needs wider lifecycle,
 search and live-loop work before the deletion can merge.
 
+Two more session tests exercise search recentering and retain the
+selected occurrence of a repeated line across filtered input. The 28
+session unit tests and Clippy passed. At `9ce6235`, five injected
+changes failed the two tests. These replace `advance` with false,
+discard the saved match, invert range equality, or replace the nearest
+distance comparison with equality or a greater-than comparison.
+
+Run `cargo test --locked -p scrl --lib session::tests`, then rerun the
+two named cases with each change applied separately to
+`scrl/src/session.rs`. The less-than-or-equal change survives. The
+sole caller saves the match after removing the stale tail and before
+appending. The saved match remains at its original line with distance
+zero, so a different equally close line cannot occur.
+
 ## Tickets
 
 
@@ -169,7 +183,7 @@ search and live-loop work before the deletion can merge.
 
 - **Area:** deslop · tests
 - **Where:** test suites and CI
-- **Problem:** Coverage and mutation results are unmeasured; no deslop mutation lane exists.
+- **Problem:** Workspace coverage and the retained protected-region mutation lane are measured. The wider renderer and live session inventory, paired cost and remaining outcomes are open.
 - **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
 - **Fix with:** deslop
 - **Effort:** M

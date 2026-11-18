@@ -1730,6 +1730,23 @@ mod tests {
     }
 
     #[test]
+    fn advance_reports_when_search_recenters_the_viewport() {
+        let mut pager = session();
+        pager.push_chunk("zero\none\ntwo\nthree\nneedle\nfive\n");
+        pager.finish();
+        pager.handle(Event::Text('/'));
+        for character in "needle".chars() {
+            pager.handle(Event::Text(character));
+        }
+        pager.handle(Event::Enter);
+        pager.handle(Event::Home);
+
+        assert!(pager.advance());
+        assert!(!pager.advance());
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rthree");
+    }
+
+    #[test]
     fn unfinished_search_does_not_wrap_before_loading_the_next_chunk() {
         let mut pager = session();
         pager.push_chunk("alpha\none\ntwo\nthree\n");
@@ -1963,6 +1980,33 @@ mod tests {
             pager.search.session.as_ref().unwrap().selected_line(),
             Some(2)
         );
+    }
+
+    #[test]
+    fn filtered_append_keeps_the_selected_occurrence_of_a_duplicate_line() {
+        let mut pager = Session::new(
+            Size { rows: 4, columns: 40 },
+            SessionOptions {
+                filter: Some("^keep".into()),
+                ..SessionOptions::default()
+            },
+        )
+        .unwrap();
+        pager.push_chunk(
+            "keep needle\nkeep north\ndrop\nkeep a\nkeep before\nkeep needle\nkeep after\nkeep south\n",
+        );
+        pager.handle(Event::Text('/'));
+        for character in "needle".chars() {
+            pager.handle(Event::Text(character));
+        }
+        pager.handle(Event::Enter);
+        pager.handle(Event::Text('n'));
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rkeep before");
+
+        pager.push_chunk("drop again\nkeep needle\nkeep end\n");
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rkeep before");
+        pager.handle(Event::Text('n'));
+        session_navigation_frame(&mut pager, b"\x1b[H\x1b[2K\rkeep south");
     }
 
     #[test]
