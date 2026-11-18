@@ -1,4 +1,4 @@
-use scrl::{ChunkSource, FileSource, FilesSource, ReaderSource};
+use scrl::{ChunkSource, Event, FileSource, FilesSource, ReaderSource, Session, SessionOptions, Size};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Cursor, Read};
 use std::path::PathBuf;
@@ -115,4 +115,39 @@ fn source_contracts_child() {
     FilesSource::new(Vec::<PathBuf>::new()).produce(&mut |s| { text.push_str(s); Ok(()) }).unwrap();
     assert_eq!(text, "");
     println!("source complete");
+}
+
+#[test]
+fn finished_session_preserves_the_last_chunk_and_ignores_late_input() {
+    let mut session = Session::new(
+        Size { rows: 4, columns: 40 },
+        SessionOptions::default(),
+    ).unwrap();
+    let input = "one\ntwo without newline";
+    session.push_chunk(input);
+    session.finish();
+    session.push_chunk("\nlate input");
+
+    let mut output = Vec::new();
+    session.document().write_to(&mut output).unwrap();
+    assert_eq!(output, input.as_bytes());
+}
+
+#[test]
+fn upward_navigation_starts_at_the_clamped_view_after_a_filtered_tail_changes() {
+    let mut session = Session::new(
+        Size { rows: 2, columns: 40 },
+        SessionOptions { filter: Some("match$".into()), ..SessionOptions::default() },
+    ).unwrap();
+    session.push_chunk("first match\nsecond match\nthird match");
+    session.handle(Event::End);
+    let mut frame = Vec::new();
+    session.draw(&mut frame).unwrap();
+    assert!(frame.starts_with(b"\x1b[H\x1b[2K\rthird match\x1b[0m"));
+
+    session.push_chunk(" extended");
+    session.handle(Event::Up);
+    frame.clear();
+    session.draw(&mut frame).unwrap();
+    assert!(frame.starts_with(b"\x1b[H\x1b[2K\rfirst match\x1b[0m"));
 }
