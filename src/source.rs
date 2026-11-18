@@ -6,7 +6,7 @@ pub use scrl::PagingMode;
 use scrl::{ChunkSource, ExitReason, RunOptions, SessionOptions};
 
 pub fn should_use_pager(mode: PagingMode) -> bool {
-    matches!(mode, PagingMode::Always | PagingMode::Auto) && io::stdout().is_terminal()
+    matches!(mode, PagingMode::Auto | PagingMode::Always) && io::stdout().is_terminal()
 }
 
 pub fn emit_reader<R: BufRead + Send + 'static>(input: R, mode: PagingMode) -> io::Result<()> {
