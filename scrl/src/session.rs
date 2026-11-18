@@ -16,7 +16,7 @@ use crate::search::{SearchInput, SearchState};
 const RESET: &str = "\x1b[0m";
 #[cfg(all(feature = "terminal", unix))]
 use crate::terminal::{
-    RawMode, SignalGuard, reraise_term, read_event_tty, read_event_tty_cancellable, suspend,
+    RawMode, SignalGuard, reraise_term, read_event_tty_cancellable, suspend,
     suspend_requested, terminated,
 };
 #[cfg(feature = "terminal")]
@@ -568,135 +568,6 @@ pub(crate) fn validate_options(options: &SessionOptions) -> io::Result<()> {
     compile_filter(options).map(drop)
 }
 
-// This entry point intentionally contains only the generic runner policy. A
-// host can use Session directly for a richer terminal adapter; the built-in
-// adapter keeps lifecycle bytes paired and falls back to direct output when a
-// controlling terminal cannot be opened.
-#[cfg(all(feature = "terminal", unix))]
-pub(crate) fn run_terminal<S: ChunkSource>(
-    source: S,
-    options: RunOptions,
-    output: &mut dyn Write,
-) -> io::Result<ExitReason> {
-    if options.session.follow
-        || matches!(
-            options.paging,
-            crate::PagingMode::Always | crate::PagingMode::Auto
-        )
-    {
-        return run_terminal_live(source, options, output);
-    }
-    #[cfg(unix)]
-    let tty = match std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-    {
-        Ok(tty) => tty,
-        Err(_) => {
-            let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
-            source.produce(&mut emit)?;
-            output.flush()?;
-            return Ok(ExitReason::EndOfInput);
-        }
-    };
-    #[cfg(not(unix))]
-    let mut tty = None::<std::fs::File>;
-
-    #[cfg(unix)]
-    let size = rustix::termios::tcgetwinsize(&tty)
-        .map(|size| Size {
-            rows: usize::from(size.ws_row).max(1),
-            columns: usize::from(size.ws_col).max(1),
-        })
-        .unwrap_or(Size {
-            rows: 24,
-            columns: 80,
-        });
-    #[cfg(not(unix))]
-    let size = Size {
-        rows: 24,
-        columns: 80,
-    };
-    let mut session = Session::new(size, options.session)?;
-    let mut emit = |chunk: &str| {
-        session.push_chunk(chunk);
-        Ok(())
-    };
-    source.produce(&mut emit)?;
-    session.finish();
-    if matches!(options.paging, crate::PagingMode::Auto)
-        && session.document.line_count() <= size.rows
-    {
-        session.document.write_to(output)?;
-        output.flush()?;
-        return Ok(ExitReason::EndOfInput);
-    }
-    #[cfg(unix)]
-    let raw = match RawMode::enter(&tty) {
-        Ok(raw) => raw,
-        Err(_) => {
-            session.document.write_to(output)?;
-            output.flush()?;
-            return Ok(ExitReason::EndOfInput);
-        }
-    };
-    let _signals = SignalGuard::install()?;
-    output.write_all(b"\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[H")?;
-    let mut result = session.draw(output);
-    if result.is_ok() {
-        loop {
-            if terminated() {
-                break;
-            }
-            if suspend_requested() {
-                suspend(output, &raw)?;
-                session.draw(output)?;
-                continue;
-            }
-            match read_event_tty(&mut &tty)? {
-                None => break,
-                Some(event) => match session.handle(event) {
-                    Action::Quit => break,
-                    Action::Continue { changed: true } => {
-                        if let Err(error) = session.draw(output) {
-                            result = Err(error);
-                            break;
-                        }
-                    }
-                    Action::Continue { changed: false } => {}
-                },
-            }
-        }
-    }
-    let cleanup = output
-        .write_all(b"\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")
-        .and_then(|()| output.flush());
-    #[cfg(unix)]
-    drop(raw);
-    drop(_signals);
-    if terminated() {
-        reraise_term();
-        return Err(io::Error::new(
-            io::ErrorKind::Interrupted,
-            "pager terminated by SIGTERM",
-        ));
-    }
-    result.and(cleanup).map(|()| ExitReason::EndOfInput)
-}
-
-#[cfg(all(feature = "terminal", not(unix)))]
-pub(crate) fn run_terminal<S: ChunkSource>(
-    source: S,
-    _options: RunOptions,
-    output: &mut dyn Write,
-) -> io::Result<ExitReason> {
-    let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
-    source.produce(&mut emit)?;
-    output.flush()?;
-    Ok(ExitReason::EndOfInput)
-}
-
 #[cfg(all(feature = "terminal", unix))]
 pub(crate) fn run_retained_terminal(
     document: Document,
@@ -938,7 +809,7 @@ fn install_pager_signals(output: &mut dyn Write) -> io::Result<SignalGuard> {
 }
 
 #[cfg(all(feature = "terminal", unix))]
-fn run_terminal_live<S: ChunkSource>(
+pub(crate) fn run_terminal_live<S: ChunkSource>(
     source: S,
     options: RunOptions,
     output: &mut dyn Write,
@@ -957,13 +828,6 @@ fn run_terminal_live<S: ChunkSource>(
             return Ok(ExitReason::EndOfInput);
         }
     };
-    #[cfg(not(unix))]
-    {
-        let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
-        source.produce(&mut emit)?;
-        output.flush()?;
-        return Ok(ExitReason::EndOfInput);
-    }
     #[cfg(unix)]
     let size = rustix::termios::tcgetwinsize(&tty)
         .map(|size| Size {
@@ -1296,18 +1160,6 @@ fn source_pull_request(session: &Session, finished: bool, event: Event) -> Sourc
     } else {
         SourcePull::None
     }
-}
-
-#[cfg(all(feature = "terminal", not(unix)))]
-fn run_terminal_live<S: ChunkSource>(
-    source: S,
-    _options: RunOptions,
-    output: &mut dyn Write,
-) -> io::Result<ExitReason> {
-    let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
-    source.produce(&mut emit)?;
-    output.flush()?;
-    Ok(ExitReason::EndOfInput)
 }
 
 impl Document {

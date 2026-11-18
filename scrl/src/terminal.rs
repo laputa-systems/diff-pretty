@@ -129,11 +129,6 @@ pub(crate) fn read_event<R: Read>(input: &mut R) -> io::Result<Option<Event>> {
 }
 
 #[cfg(unix)]
-pub(crate) fn read_event_tty<R: Read>(input: &mut R) -> io::Result<Option<Event>> {
-    read_event_inner(input, true, None)
-}
-
-#[cfg(unix)]
 pub(crate) fn read_event_tty_cancellable<R: Read>(
     input: &mut R,
     cancelled: &AtomicBool,

@@ -68,14 +68,11 @@ pub fn run_source<S: ChunkSource>(source: S, options: RunOptions) -> io::Result<
         return Ok(ExitReason::EndOfInput);
     }
 
-    // The terminal adapter is deliberately kept behind the feature boundary.
-    // The state machine remains usable on all targets; unsupported terminal
-    // environments fall back to direct output rather than failing a render.
-    #[cfg(feature = "terminal")]
+    #[cfg(all(feature = "terminal", unix))]
     {
-        crate::session::run_terminal(source, options, &mut output)
+        crate::session::run_terminal_live(source, options, &mut output)
     }
-    #[cfg(not(feature = "terminal"))]
+    #[cfg(not(all(feature = "terminal", unix)))]
     {
         let mut emit = |chunk: &str| output.write_all(chunk.as_bytes());
         source.produce(&mut emit)?;

@@ -32,7 +32,7 @@ sha256 = '5b8cae2e7885853cd87eaf8c3dd36194409f7590c511c19069d3ceb384f50ae6'
 [[equivalent]]
 name = 'scrl/src/session.rs:398:70: replace + with * in Session::draw'
 file = 'scrl/src/session.rs'
-sha256 = 'f598956b76255b6ba26b45d9972158fbd37b2281a6e0e52c00fa42a8ce74633a'
+sha256 = '69c19be3ba4046e600a4353a76a03e4e2cd7b1bf128058225461a7fd8cb7160f'
 reason = 'capacity changes but the same command characters are pushed'
 
 [[equivalent]]
@@ -82,3 +82,9 @@ name = 'src/render.rs:1211:38: replace + with * in terminal_control_end'
 file = 'src/render.rs'
 sha256 = '2223b5f93ae1b6ba272a1fcc38fd8c9a212d04a7bbae6800815293dbe258617b'
 reason = 'The remaining BEL is removed by the caller as a bare control.'
+
+[[equivalent]]
+name = 'scrl/src/terminal.rs:212:13: delete match arm 0x20..= 0x7e in KeyDecoder::next'
+file = 'scrl/src/terminal.rs'
+sha256 = '91d709a19a9108efcfb3f13dc8b959a15edf7f6beb6a7bc0cada082010b0e620'
+reason = 'The production reader passes one byte at a time. For an ASCII byte the UTF-8 fallback emits the same text event.'
