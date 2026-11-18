@@ -73,7 +73,9 @@ jobs:
           mkdir -p .work/tmp
           TMPDIR="$PWD/.work/tmp" make mutants-gate-test
       - name: Mutation selection and results
-        run: TMPDIR="$PWD/.work/tmp" make mutants-diff BASE="$BASE_SHA" SHARD="$SHARD"
+        env:
+          TMPDIR: "${{ github.workspace }}/.work/tmp"
+        run: make mutants-diff BASE="$BASE_SHA" SHARD="$SHARD"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

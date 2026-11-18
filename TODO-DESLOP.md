@@ -5,6 +5,16 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+PR [#31](https://github.com/laputa-systems/diff-pretty/pull/31) qualified
+the changed-source and protected-region gate on macOS arm64 and Linux arm64.
+The 12 successful mutation jobs used 2,276 runner seconds in aggregate.
+The mixed change, deletion, uncovered branch and documentation controls
+are recorded in #36–39. On macOS arm64, five interleaved warm suite pairs
+against `49a1c97` had a median of 1.19 seconds for each revision and ran
+all 68 baseline and 89 candidate tests. The #31 receipt identifies the
+workload-qualified runtime inputs. Remaining renderer and live terminal
+coverage keep DSLP-4 open.
+
 Session navigation: three literal frame/action scenarios cover page and edge
 movement, horizontal shifts, follow, help and search routing. The complete
 44-mutant five-method selection has 43 caught and one unviable, with no misses
