@@ -32,7 +32,7 @@ sha256 = '5b8cae2e7885853cd87eaf8c3dd36194409f7590c511c19069d3ceb384f50ae6'
 [[equivalent]]
 name = 'scrl/src/session.rs:398:70: replace + with * in Session::draw'
 file = 'scrl/src/session.rs'
-sha256 = 'f598956b76255b6ba26b45d9972158fbd37b2281a6e0e52c00fa42a8ce74633a'
+sha256 = '183d226f50b07872c20d91a53673bbc054f5e99867123e502f565cd8325eaeb8'
 reason = 'capacity changes but the same command characters are pushed'
 
 [[equivalent]]
