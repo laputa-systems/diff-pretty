@@ -2,10 +2,11 @@
 
 use std::io::{Read, Write};
 use std::os::fd::BorrowedFd;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use rustix::fs::{Mode, OFlags};
+use rustix::process::{self, Pid, Signal};
 use rustix::pty::OpenptFlags;
 use rustix::termios::{self, LocalModes, OptionalActions, OutputModes, Winsize};
 
@@ -22,7 +23,12 @@ impl Drop for OwnedChild {
     fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
 }
 
-fn exercise(mode: &str, interactive: bool, read_error: bool) {
+enum Interaction {
+    Quit,
+    Terminate,
+}
+
+fn exercise(mode: &str, interaction: Option<Interaction>, read_error: bool) {
     let master = rustix::pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
     rustix::fs::fcntl_setfl(&master, OFlags::NONBLOCK).unwrap();
     rustix::pty::grantpt(&master).unwrap();
@@ -63,8 +69,15 @@ fn exercise(mode: &str, interactive: bool, read_error: bool) {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::Interrupted => {},
             Err(e) => panic!("pty read: {e}"),
         }
-        if interactive && !sent && output.windows(3).any(|w| w == b"new") && output.windows(8).any(|w| w == b"\x1b[?1049h") {
-            master.write_all(b"q").unwrap();
+        if let Some(action) = &interaction
+            && !sent
+            && output.windows(3).any(|w| w == b"new")
+            && output.windows(8).any(|w| w == b"\x1b[?1049h")
+        {
+            match action {
+                Interaction::Quit => master.write_all(b"q").unwrap(),
+                Interaction::Terminate => process::kill_process(Pid::from_child(&child.0), Signal::TERM).unwrap(),
+            }
             sent = true;
         }
         if let Some(status) = child.0.try_wait().unwrap() { break status; }
@@ -87,6 +100,9 @@ fn exercise(mode: &str, interactive: bool, read_error: bool) {
         assert_eq!(status.code(), Some(1));
         assert!(stderr.starts_with(b"failed to write output: "));
         assert!(output.is_empty());
+    } else if matches!(interaction, Some(Interaction::Terminate)) {
+        assert_eq!(status.signal(), Some(Signal::TERM.as_raw()));
+        assert!(stderr.is_empty());
     } else {
         assert_eq!(status.code(), Some(0), "stderr: {:?}", String::from_utf8_lossy(&stderr));
         assert!(stderr.is_empty());
@@ -97,7 +113,7 @@ fn exercise(mode: &str, interactive: bool, read_error: bool) {
     if read_error {
         return;
     }
-    if interactive {
+    if interaction.is_some() {
         assert!(sent, "payload not observed: {:?}", String::from_utf8_lossy(&output));
         assert!(output.windows(8).any(|w| w == b"\x1b[?1049l"));
         assert!(output.windows(6).any(|w| w == b"\x1b[?25h"));
@@ -108,11 +124,16 @@ fn exercise(mode: &str, interactive: bool, read_error: bool) {
 }
 
 #[test]
-fn auto_short_diff_is_cooked_direct_output() { exercise("auto", false, false); }
+fn auto_short_diff_is_cooked_direct_output() { exercise("auto", None, false); }
 #[test]
-fn never_is_cooked_direct_output() { exercise("never", false, false); }
+fn never_is_cooked_direct_output() { exercise("never", None, false); }
 #[test]
-fn always_enters_and_restores_terminal() { exercise("always", true, false); }
+fn always_enters_and_restores_terminal() { exercise("always", Some(Interaction::Quit), false); }
 
 #[test]
-fn auto_reports_source_read_error() { exercise("auto", false, true); }
+fn auto_reports_source_read_error() { exercise("auto", None, true); }
+
+#[test]
+fn sigterm_restores_terminal_and_preserves_signal_exit() {
+    exercise("always", Some(Interaction::Terminate), false);
+}
