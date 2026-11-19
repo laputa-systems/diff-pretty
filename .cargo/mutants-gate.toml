@@ -32,8 +32,16 @@ sha256 = '5b8cae2e7885853cd87eaf8c3dd36194409f7590c511c19069d3ceb384f50ae6'
 [[equivalent]]
 name = 'scrl/src/session.rs:398:70: replace + with * in Session::draw'
 file = 'scrl/src/session.rs'
-sha256 = '183d226f50b07872c20d91a53673bbc054f5e99867123e502f565cd8325eaeb8'
+sha256 = 'faef85b532715d6242072c0bd20b47e5ede34793c15974a6930c21bd3b800d56'
 reason = 'capacity changes but the same command characters are pushed'
+
+# The UTF-8 fallback decodes a lone printable ASCII byte to the same text
+# event, and the reader feeds one byte before each call. See TODO-DESLOP.md.
+[[equivalent]]
+name = 'scrl/src/terminal.rs:212:13: delete match arm 0x20..= 0x7e in KeyDecoder::next'
+file = 'scrl/src/terminal.rs'
+sha256 = 'fcde560cbb7d579cfb3fa6403c4b897a061c344fb23762798d63cf3abe68d23e'
+reason = 'the UTF-8 fallback yields the same text event for a single ASCII byte'
 
 [[equivalent]]
 name = 'src/render.rs:1119:5: replace has_terminal_controls -> bool with true'

@@ -50,7 +50,6 @@ dependencies = [
 name = "diff-pretty"
 version = "0.0.1"
 dependencies = [
- "regex-lite",
  "rustix",
  "rustybench",
  "scrl",

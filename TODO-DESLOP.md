@@ -5,6 +5,39 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+DSLP-5: `run_source` handles `Never` before terminal dispatch; `Auto` and
+`Always` enter the live runner. The unreachable retained-source branch and
+its only `read_event_tty` adapter were removed (DSLP-8). The separate
+`run_document` retained runner remains live through its public entry point.
+No package, script, documentation or test registers the removed path. The
+branch was Unix terminal-feature code; the non-Unix and feature-disabled
+fallbacks are unchanged. Workspace CLI and PTY tests cover the consumers.
+
+The only `allow(dead_code)` was on `KeyDecoder::timed_out`, called by
+`read_event_inner` for idle TTY reads and by a decoder test; the unnecessary
+suppression was removed. The test-only `DiffRenderer::document` is used by
+renderer tests, `read_event` by terminal tests, and the other `cfg(test)`
+blocks register tests; their local helpers are used by those tests. Public
+library entry points remain available to unknown external consumers.
+
+`cargo-machete` identified the root's unused `regex-lite`; only `scrl`
+imports it, so the root declaration was removed and scrl's kept. The rustc
+scan identified unreachable `pub` on two integration-test support functions;
+`tests/cli.rs` and `scrl/tests/cli.rs` call `support::run`, and
+`tests/cli.rs` calls `bare_controls::run`, so their visibility is now
+`pub(crate)`. A no-default-features scan warns on `Document::filtered`,
+`SourcePull`, and `source_pull_request`: the terminal-feature retained runner
+calls `Session::from_document` and `filtered`, while the live runner calls
+`source_pull_request` and uses `SourcePull`. They are live with terminal
+support and the latter two also have session tests.
+
+On macOS arm64, the locked workspace all-target rustc scan is clean after
+these changes; cargo-machete 0.10.1 reports no unused dependencies. The
+release workspace suite and all-feature lint pass. The no-default-features
+check passes with the three conditional-use warnings above. Linux execution
+and external consumers were not tested. No public contract was changed.
+
+
 DSLP-4 closed under the revised 2026-11-19 mutation policy. This disposition
 supersedes the earlier open-status statements below, which record past results.
 
@@ -208,14 +241,6 @@ zero, so a different equally close line cannot occur.
 
 
 
-### DSLP-5 · P2 · Dead code: tools and debloat
-
-- **Area:** deslop · dead code
-- **Where:** whole repository
-- **Problem:** No dead-code scan has run.
-- **Recommendation:** Run the deslop Dead code step. Accept: tools clean or allowlisted with reasons; walk-backs filed as Needs owner tickets.
-- **Fix with:** deslop
-- **Effort:** M
 
 
 
@@ -230,13 +255,3 @@ zero, so a different equally close line cannot occur.
 - **Recommendation:** Add bounded process-level scenarios for valid direct output and representative invalid input and I/O errors for both commands, with literal output and exit assertions. Include src/main.rs and scrl/src/main.rs in the Tests step's critical mutation scope.
 - **Fix with:** test-audit
 - **Effort:** M
-
-
-### DSLP-8 · P3 · Investigate unreachable legacy terminal runner branch
-
-- **Area:** pager · dead code
-- **Where:** scrl/src/lib.rs:60; scrl/src/session.rs:595; scrl/src/session.rs:608
-- **Problem:** Dead-code candidate: run_source returns before calling run_terminal when paging is Never, and Always or Auto immediately dispatch to run_terminal_live. The subsequent retained-source branch appears unreachable through the sole production caller. Its liveness across tests, features, and platforms is unproven, and it duplicates terminal lifecycle logic.
-- **Recommendation:** Trace all callers and supported feature and platform configurations; if no caller reaches the branch, remove it and its exclusively used helpers while preserving the public runner and testing its consumers.
-- **Fix with:** dead-code-archaeology
-- **Effort:** S
