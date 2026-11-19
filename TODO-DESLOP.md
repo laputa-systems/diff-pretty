@@ -5,6 +5,34 @@ Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/mai
 
 ## Report
 
+DSLP-4 closed under the revised 2026-11-19 mutation policy. This disposition
+supersedes the earlier open-status statements below, which record past results.
+
+- Rendered diff bytes, metadata and terminal-control filtering: `tests/cli.rs`
+  and `src/render.rs` literal public-renderer oracles; streaming and error
+  propagation: `src/source.rs` and `scrl/tests/source_contracts.rs`.
+- Pager frames, navigation, search and input lifetime: `scrl/src/session.rs`
+  literal draw/navigation/search tests and `scrl/tests/source_contracts.rs`;
+  live entry, quit and output: `tests/pager_entry.rs` real PTY cases. The
+  draw fault and selection are documented in [draw proof](docs/deslop-session-draw.md).
+- Terminal restoration and signal exit: `tests/pager_entry.rs` real PTY quit
+  and SIGTERM cases; `scrl/src/terminal.rs` raw-mode and signal-guard tests.
+- Exit codes and I/O errors: `tests/cli.rs`, `scrl/tests/cli.rs` and the pager
+  PTY read-error case exercise success, invalid input and read/write failures.
+
+The retained required changed-source and protected-region gate is recorded in
+#31, with negative controls #36–39; its configured critical scopes cover CLI,
+numeric layout, terminal-control filtering, source, session navigation and
+draw. Wider renderer and aggregate live-session inventories are advisory, not
+closure gates. Their incomplete outcomes and unconfirmed timeouts are not
+passes. The PTY cases protect entry, quit and signal cleanup, not every live
+loop interleaving or resize; full renderer format and external consumer coverage
+remain unverified. No new mutation trial was needed: 0 runner-minutes spent in
+this closeout. The earlier five warm pairs had equal 1.19s medians for their
+identified revisions; no current paired cost or quiet-host performance claim is
+made. Coverage is a report, not a threshold. The coverage target from 013c089
+was already integrated as #41 (b8a47c9).
+
 PR [#31](https://github.com/laputa-systems/diff-pretty/pull/31) qualified
 the changed-source and protected-region gate on macOS arm64 and Linux arm64.
 The 12 successful mutation jobs used 2,276 runner seconds in aggregate.
@@ -179,14 +207,6 @@ zero, so a different equally close line cannot occur.
 
 
 
-### DSLP-4 · P2 · Tests: coverage, boundary gaps, mutation
-
-- **Area:** deslop · tests
-- **Where:** test suites and CI
-- **Problem:** Workspace coverage and the retained protected-region mutation lane are measured. The wider renderer and live session inventory, paired cost and remaining outcomes are open.
-- **Recommendation:** Run the deslop Tests step. Accept: no undispositioned survivor in critical code, the test cost budget holds, and the lane is green where the tools are mirrored.
-- **Fix with:** deslop
-- **Effort:** M
 
 ### DSLP-5 · P2 · Dead code: tools and debloat
 
