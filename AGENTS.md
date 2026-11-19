@@ -6,6 +6,7 @@ Rust renderer for Git-style unified diffs with an optional built-in pager.
 
 - Build: `make build`
 - Test: `make test`
+- Bench: `make bench` (Edit); `make bench-list`, `make bench-check` and `make bench-baseline`
 - Check: `cargo check --workspace --all-targets`
 
 ## Invariants

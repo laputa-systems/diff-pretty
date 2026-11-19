@@ -14,23 +14,31 @@ and `make test` on pushes and pull requests for Linux and macOS.
 
 ## Benchmarks
 
-`make bench` runs the curated root suite through rustybench and saves a local,
-machine-specific baseline. By default, the Makefile looks for rustybench in
-the sibling `../rustybench` checkout; set `RUSTYBENCH` to override it. To
-compare a candidate file, set `AFTER` to its path when running
-`make bench-diff`.
+`make bench` runs the Edit tier (driver self-tests). `make bench-list` lists
+all workloads, tiers and commands; `make bench-check BENCH_ARGS="--tier change"`
+checks selected prerequisites without running them. Select a tier ceiling with
+`BENCH_ARGS="--tier change"`, and repeat `--name NAME`, `--area render` or
+`--area pager`, and `--skip NAME` to narrow it. Names and areas are distinct.
+`--dry-run` prints commands without writing a run. Unknown or empty selections
+fail. Full requires explicit `--tier full`; do not run it automatically.
 
-The root suite covers rendering, alignment, allocation behavior, streaming,
-retained documents, and pager viewports. Its show-fixture bundles are the
-named lists in `benches/bench.rs`, not a size cutoff. The `scrl` suite is in
-`scrl/benches/bench.rs` and can be run with:
+Edit is estimated seconds; individual Change operations are estimated minutes
+including compilation, and Scenario and Full may take longer. Rust and the
+checked-in patch corpus are required for benchmark operations. Each run writes
+logs and a summary under `.work/bench/` with exclusions and host information.
+The short single-sample runs establish completion, not a performance verdict;
+they are not host-gated. The original measurements and sample defaults remain
+available via `make bench-baseline`: it runs the root suite through rustybench
+and persists `benches/baseline.json`. The default sibling `../rustybench`
+checkout may be replaced with `RUSTYBENCH=rustybench`. Compare a candidate with
+`make bench-diff AFTER=path/to/baseline.json` using the same override.
 
-```sh
-cargo bench -p scrl --bench bench
-```
-
-The pager suite includes filtered streaming and redraw over real diff fixtures
-at 50-KiB, 500-KiB and 5-MiB minimum scales. It measures complete session
-construction and retained input, with exact selection and nonempty-frame checks.
+The root suite covers fixture render bundles, retained documents, streaming,
+color, plain diffs and viewport writes. The `scrl` suite covers synthetic
+redraw and search plus filtered real-fixture streams at 50 KiB, 500 KiB and
+5 MiB. Setup is outside the measured closures except where the operation is
+construction. For profiling, use platform CPU sampling and allocation tools in
+separate runs; `rustybench syscalls` offers Linux syscall diagnostics, not timing.
+No current automatic comparison qualifies host load or interleaves revisions.
 
 See [architecture](architecture.md) for source locations and [release](release.md) for artifact builds.

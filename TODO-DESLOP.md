@@ -1,9 +1,27 @@
 Prefix: DSLP
-Next: 10
+Next: 12
 
 Deslop campaign backlog ([plan](https://github.com/laputa-systems/stuff/blob/main/docs/campaigns/deslop.md), tier A). One agent works this file with the `deslop` skill: take the lowest-numbered open ticket whose area does not start with `Needs owner ·`. After DSLP-5, work the open P1 and P2 findings, then fill in `## Report` below.
 
 ## Report
+
+Bench audit: root show typical/metadata/large/corpus measure render throughput;
+log, color and plain measure format paths; reader-to-sink measures streaming;
+retained document and synthetic log measure document construction; viewport
+measures a retained frame. The scrl synthetic redraw, clipping and search cases
+measure those operations; 50 KiB/500 KiB/5 MiB filtered real-fixture streams
+measure session construction and redraw, with line-count and nonempty-frame
+checks. Most other cases black-box output or length without an output oracle.
+Allocation counts and steady-state elapsed time exclude setup and CLI startup;
+no process-tree CPU, peak RSS, I/O or live-terminal journey is measured. Ranked
+DSLP-10 (P2) covers user-facing journey and correctness gaps; DSLP-11 (P3)
+covers attribution and comparison validity. CPU sampling, allocation profiling
+and Linux `rustybench syscalls` are separate, overhead-bearing diagnostics.
+The saved host baseline is a comparison anchor, not an interleaved host gate;
+no budget automatically detects a regression. Fixtures are checkout files, not
+separately pinned; the old sibling rustybench prerequisite is checkout-dependent.
+No open Bench ticket existed. Full was not run.
+
 
 DSLP-5: `run_source` handles `Never` before terminal dispatch; `Auto` and
 `Always` enter the live runner. The unreachable retained-source branch and
@@ -247,6 +265,15 @@ zero, so a different equally close line cannot occur.
 
 
 
+### DSLP-10 · P2 · Measure complete CLI rendering and pager journeys
+
+- **Area:** Bench · user journeys
+- **Where:** benches/bench.rs; scrl/benches/bench.rs
+- **Problem:** The existing in-process benchmarks omit CLI startup, redirected I/O and live terminal paging, so user-visible latency, CPU and memory regressions can ship unseen. Most render operations only consume output length without a correctness oracle.
+- **Recommendation:** Add representative end-to-end CLI and PTY workloads with output and completion checks, resource measurements and a comparable reference.
+- **Fix with:** refactor-benchmarks
+- **Effort:** L
+
 ### DSLP-6 · P3 · Guard CLI success and failure contracts at the process boundary
 
 - **Area:** CLI · tests
@@ -254,4 +281,14 @@ zero, so a different equally close line cannot occur.
 - **Problem:** Test-gap finding: the root CLI process test only rejects an invalid paging value, while valid paging flags, rendered output, successful exit, and I/O failure exit are not asserted through the executable. The scrl process test covers short auto paging but not its other flags or error exits. Regressions in argument wiring or status mapping can therefore pass the workspace suite.
 - **Recommendation:** Add bounded process-level scenarios for valid direct output and representative invalid input and I/O errors for both commands, with literal output and exit assertions. Include src/main.rs and scrl/src/main.rs in the Tests step's critical mutation scope.
 - **Fix with:** test-audit
+- **Effort:** M
+
+
+### DSLP-11 · P3 · Qualify benchmark comparisons and attribution
+
+- **Area:** Bench · measurement
+- **Where:** benches/bench.rs; docs/development.md
+- **Problem:** Steady-state allocator counts and elapsed samples do not explain CPU, peak footprint or I/O, and the persisted host baseline is not an interleaved gated reference. Fixture and host changes can confound comparisons.
+- **Recommendation:** Qualify interleaved comparisons and fixture identity, and document separate CPU sampling, allocation and syscall attribution runs with their overhead.
+- **Fix with:** benchmark-checklist
 - **Effort:** M
