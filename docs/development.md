@@ -18,7 +18,7 @@ and `make test` on pushes and pull requests for Linux and macOS.
 all workloads, tiers and commands; `make bench-check BENCH_ARGS="--tier change"`
 checks selected prerequisites without running them. Select a tier ceiling with
 `BENCH_ARGS="--tier change"`, and repeat `--name NAME`, `--area render` or
-`--area pager`, and `--skip NAME` to narrow it. Names and areas are distinct.
+`--area pager` or `--area cli`, and `--skip NAME` to narrow it. Names and areas are distinct.
 `--dry-run` prints commands without writing a run. Unknown or empty selections
 fail. Full requires explicit `--tier full`; do not run it automatically.
 
@@ -42,3 +42,10 @@ separate runs; `rustybench syscalls` offers Linux syscall diagnostics, not timin
 No current automatic comparison qualifies host load or interleaves revisions.
 
 See [architecture](architecture.md) for source locations and [release](release.md) for artifact builds.
+
+The CLI workloads build the release binary in preflight. `cli_render_show_010`
+measures a redirected process and checks every output byte against `render`;
+`cli_pager_show_010` measures opening, paging, searching and quitting a PTY,
+checking fixture-derived frame markers and restored terminal modes. Timings
+include child startup and I/O. Allocator counts cover only the benchmark process,
+not its child; child CPU and peak RSS are not measured.
