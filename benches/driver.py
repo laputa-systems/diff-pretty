@@ -14,6 +14,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 TIERS = ('edit', 'change', 'scenario', 'full')
+CLI_BINARY = None
 ROOT_NAMES = ('render_show_typical render_show_metadata render_show_large render_show_corpus '
               'render_document_show_010 render_reader_to_log_000 render_log_000 '
               'render_log_000_color render_plain_unified '
@@ -25,6 +26,8 @@ SCRL_NAMES = ('viewport_redraw_no_search viewport_redraw_styled viewport_redraw_
 # Each existing operation remains available individually; the largest workload is manual.
 WORK = [('self-test', 'edit', 'driver', 'selection and preflight contracts')]
 WORK += [(n, 'scenario' if n == 'render_show_corpus' else 'change', 'render', 'render, stream or viewport operation') for n in ROOT_NAMES]
+WORK += [('cli_render_show_010', 'change', 'cli', 'redirected render with byte oracle'),
+         ('cli_pager_show_010', 'scenario', 'cli', 'terminal paging and search journey')]
 WORK += [(n, 'full' if n.endswith('_5m') else 'change', 'pager', 'pager redraw, search or filtered stream') for n in SCRL_NAMES]
 
 
@@ -53,7 +56,8 @@ def command(w):
     return cmd + ['--bench', 'bench', '--', '--exact', 'bench::' + w[0]] + options
 
 
-def preflight(selected):
+def preflight(selected, build_binary=True):
+    global CLI_BINARY
     errors = []
     for tool in ({'cargo', 'rustc'} if any(w[2] != 'driver' for w in selected) else set()):
         if not shutil.which(tool):
@@ -78,9 +82,24 @@ def preflight(selected):
             required.add('log_000_color')
         elif name == 'render_plain_unified':
             required.add('plain_unified')
+    if any(w[2] == 'cli' for w in selected):
+        required.add('show_010')
     missing = [name for name in sorted(required) if not (ROOT / 'fixtures' / (name + '.patch')).is_file()]
     if missing:
         errors.append('missing fixtures: ' + ', '.join(missing) + '; restore checkout fixtures')
+    if build_binary and not errors and any(w[2] == 'cli' for w in selected):
+        result = subprocess.run(['cargo', 'build', '--release', '--bin', 'diff-pretty', '--message-format=json'],
+                                cwd=ROOT, capture_output=True, text=True)
+        if result.returncode:
+            errors.append('release diff-pretty build failed: ' + result.stderr)
+        else:
+            artifacts = [json.loads(line) for line in result.stdout.splitlines()]
+            paths = [a['executable'] for a in artifacts if a.get('reason') == 'compiler-artifact'
+                     and a.get('target', {}).get('name') == 'diff-pretty' and a.get('executable')]
+            if len(paths) != 1 or not Path(paths[0]).is_file():
+                errors.append('release diff-pretty executable missing from Cargo artifacts')
+            else:
+                CLI_BINARY = paths[0]
     return errors
 
 
@@ -107,7 +126,7 @@ def main():
     for w in WORK:
         if w not in selected:
             print(f'excluded {w[0]}: selector or tier ceiling')
-    errors = preflight(selected)
+    errors = preflight(selected, build_binary=not args.dry_run)
     if errors:
         for error in errors:
             print(error, file=sys.stderr)
@@ -123,7 +142,10 @@ def main():
     for w in selected:
         start = time.monotonic()
         with (directory / (w[0] + '.log')).open('w') as log:
-            result = subprocess.run(command(w), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+            env = os.environ.copy()
+            if w[2] == 'cli':
+                env['DIFF_PRETTY_BENCH_BINARY'] = CLI_BINARY
+            result = subprocess.run(command(w), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
         status = result.returncode
         if w[2] != 'driver' and w[0] not in (directory / (w[0] + '.log')).read_text():
             print(f'{w[0]}: benchmark output missing; selection did not run', file=sys.stderr)
