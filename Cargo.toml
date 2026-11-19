@@ -9,7 +9,6 @@ description = "A pager and renderer for Git-style unified diffs"
 members = ["scrl"]
 
 [dependencies]
-regex-lite = "0.1.9"
 scrl = { path = "scrl" }
 
 [dev-dependencies]

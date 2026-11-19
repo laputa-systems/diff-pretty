@@ -14,7 +14,7 @@ impl Drop for OwnedChild {
     }
 }
 
-pub fn run(mut command: Command, input: Option<&[u8]>) -> Output {
+pub(crate) fn run(mut command: Command, input: Option<&[u8]>) -> Output {
     command.stderr(Stdio::piped());
     if input.is_some() {
         command.stdin(Stdio::piped());

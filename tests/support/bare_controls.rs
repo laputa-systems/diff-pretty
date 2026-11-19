@@ -2,7 +2,7 @@ use std::io::Write;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-pub fn run(input: &str) -> Output {
+pub(crate) fn run(input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_diff-pretty"))
         .arg("--no-pager")
         .stdin(Stdio::piped())
