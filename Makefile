@@ -12,12 +12,13 @@ cargo = $(if $(findstring -linux-musl,$(TARGET)),,$(if $(filter release-static t
 RUSTYBENCH  ?= cargo run --quiet --manifest-path ../rustybench/Cargo.toml --
 
 .PHONY: build test test-ci lint coverage release verify-release install
-.PHONY: scrl bench bench-diff
+.PHONY: scrl bench bench-check bench-list bench-baseline bench-diff
 
 build:
 	$(call cargo,dev) build
 
 test:
+	python3 -B benches/test_driver.py
 	cargo test --workspace --release
 
 test-ci:
@@ -58,16 +59,25 @@ install: release
 scrl:
 	cargo build --release -p scrl
 
+bench:
+	@python3 -B benches/driver.py $(BENCH_ARGS)
+
+bench-check:
+	@python3 -B benches/driver.py --check $(BENCH_ARGS)
+
+bench-list:
+	@python3 -B benches/driver.py --list
+
 # Run the curated rustybench suite and persist a host baseline (see benches/bench.rs
 # for what is measured and why).
-bench:
+bench-baseline:
 	@$(RUSTYBENCH) baseline --root "$(CURDIR)" --baseline "$(CURDIR)/benches/baseline.json" -- cargo bench --bench bench
 
 # Compare a candidate baseline against the persisted host baseline.
 # Usage: make bench-diff AFTER=path/to/baseline.json
 bench-diff:
 	@BASELINE="$(CURDIR)/benches/baseline.json"; \
-	test -f "$$BASELINE" || { echo "no baseline yet; run 'make bench' first" >&2; exit 1; }; \
+	test -f "$$BASELINE" || { echo "no baseline yet; run 'make bench-baseline' first" >&2; exit 1; }; \
 	$(RUSTYBENCH) diff "$$BASELINE" "$(AFTER)"
 
 # BASE must name the target branch or its merge base; SHARD is one CI partition.
