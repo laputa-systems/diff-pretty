@@ -36,7 +36,7 @@ sha256 = 'faef85b532715d6242072c0bd20b47e5ede34793c15974a6930c21bd3b800d56'
 reason = 'capacity changes but the same command characters are pushed'
 
 # The UTF-8 fallback decodes a lone printable ASCII byte to the same text
-# event, and the reader feeds one byte before each call. See TODO-DESLOP.md.
+# event, and the reader feeds one byte before each call.
 [[equivalent]]
 name = 'scrl/src/terminal.rs:212:13: delete match arm 0x20..= 0x7e in KeyDecoder::next'
 file = 'scrl/src/terminal.rs'
