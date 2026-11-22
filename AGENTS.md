@@ -19,6 +19,8 @@ Rust renderer for Git-style unified diffs with an optional built-in pager.
 
 ## Verification
 
+`make clean` removes the checkout’s ordinary `./target` directory. It refuses a file or symlink at that path.
+
 - `cpu-guard --cores 6 -- make test`: release workspace suite; 15.41s fresh target, 1.40s warm on macOS.
 - `cpu-guard --cores 6 -- make lint`: all targets and features; 3.45s with a fresh test target.
 - Edit: `cargo test --workspace --test cli`; twelve bounded process scenarios assert literal output, paging flags, help, operands, invalid UTF-8, terminal-control filtering and read/write failure exits. Current cost remains unqualified.
