@@ -2,6 +2,8 @@
 
 Rust renderer for Git-style unified diffs with an optional built-in pager.
 
+The roadmap, [docs/roadmap.md](docs/roadmap.md), holds all current and future work; its Status is the resume point.
+
 ## Commands
 
 - Build: `make build`
