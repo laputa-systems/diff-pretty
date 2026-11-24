@@ -12,6 +12,18 @@ cargo check --workspace --all-targets
 the quiet form, `make test-ci`. CI runs `cargo check --workspace --all-targets`
 and `make test` on pushes and pull requests for Linux and macOS.
 
+## Coverage and mutation checks
+
+Run `make coverage` to write a workspace HTML report and print the branch
+summary. Coverage does not establish that assertions detect defects.
+
+Run `make mutants-gate-test` to check the mutation gate. Run
+`make mutants-diff BASE=origin/main SHARD=render` to check a component against
+the merge base. The available shards are `cli`, `config`, `render`, `source`,
+`session` and `other`. The gate requires Python 3.11 or newer and cargo-mutants.
+Keep mutation build targets separate from ordinary test targets. A missing
+result, unresolved timeout or exhausted deadline is not a passing result.
+
 ## Benchmarks
 
 `make bench` runs the Edit tier (driver self-tests). `make bench-list` lists

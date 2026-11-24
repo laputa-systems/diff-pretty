@@ -1,11 +1,11 @@
 Prefix: DIFF
-Next: 7
+Next: 9
 ### DIFF-4 · P3 · Guard CLI success and failure contracts at the process boundary
 
 - **Area:** CLI · tests
 - **Where:** tests/cli.rs:4; src/main.rs:20; scrl/src/main.rs:54; scrl/tests/auto_paging.rs:13
-- **Problem:** Test-gap finding: the root CLI process test only rejects an invalid paging value, while valid paging flags, rendered output, successful exit, and I/O failure exit are not asserted through the executable. The scrl process test covers short auto paging but not its other flags or error exits. Regressions in argument wiring or status mapping can therefore pass the workspace suite.
-- **Recommendation:** Add bounded process-level scenarios for valid direct output and representative invalid input and I/O errors for both commands, with literal output and exit assertions. Include src/main.rs and scrl/src/main.rs in the Tests step's critical mutation scope.
+- **Problem:** Both CLI suites now assert valid output, paging options, help and representative read and write errors, and the mutation gate includes both entry points. Remaining process-level edge cases and untested terminal interleavings can still regress without a focused witness.
+- **Recommendation:** Audit the CLI process boundaries for user-visible gaps and add bounded literal-output or exit-status scenarios only where existing tests do not protect the contract.
 - **Fix with:** test-audit
 - **Effort:** M
 
@@ -27,3 +27,20 @@ Next: 7
 - **Fix with:** benchmark-checklist
 - **Effort:** M
 
+### DIFF-7 · P3 · Cover remaining renderer and pager behavior boundaries
+
+- **Area:** Renderer and pager · tests
+- **Where:** src/render.rs; scrl/src/session.rs; scrl/src/terminal.rs; scrl/src/document.rs; scrl/src/search.rs; scrl/src/source.rs; tests/pager_entry.rs
+- **Problem:** Existing literal renderer, session, source and PTY tests do not establish full diff-format or exported API coverage, every search and streaming error decision, live-loop interleaving, resize or terminal lifecycle behavior. Wider mutation and coverage inventories are incomplete, so regressions in those paths may go undetected.
+- **Recommendation:** Identify reachable user-visible gaps in these paths, add focused behavioral witnesses or document dispositions, and refresh coverage and targeted mutation results without treating incomplete runs as passes.
+- **Fix with:** test-audit
+- **Effort:** L
+
+### DIFF-8 · P3 · Qualify current test and renderer performance
+
+- **Area:** Performance · verification
+- **Where:** Makefile; benches/bench.rs; docs/development.md
+- **Problem:** Quiet-host paired test-cost and cumulative renderer runtime measurements at the integrated revision were deferred. A historical corpus regression at dca96f1 against 49a1c97 had no established cause, while a later candidate comparison did not reproduce it. Linux performance was also unmeasured.
+- **Recommendation:** When a comparison is needed, measure representative test and renderer workloads against an appropriate baseline with interleaved runs and host gates. Investigate the historical regression if it reproduces, and assess Linux separately if it is in scope.
+- **Fix with:** benchmark-checklist
+- **Effort:** M

@@ -21,14 +21,14 @@ file = 'scrl/src/session.rs'
 regex = 'Session::(handle|content_rows|max_top|clamp_top|horizontal_shift|draw|draw_help)'
 
 # num_digits(1) reaches zero and remains in the inverted loop forever.
-# See docs/deslop-cli-tests.md, numeric layout boundary; reconfirm on each run.
+# Reconfirm the hang on each run.
 [[confirmed_hangs]]
 name = 'src/config.rs:80:13: replace >= with < in num_digits'
 file = 'src/config.rs'
 sha256 = '5b8cae2e7885853cd87eaf8c3dd36194409f7590c511c19069d3ceb384f50ae6'
 
 # This expression only chooses the initial String capacity; both paths push
-# the same characters. See docs/deslop-session-draw.md.
+# the same characters.
 [[equivalent]]
 name = 'scrl/src/session.rs:398:70: replace + with * in Session::draw'
 file = 'scrl/src/session.rs'
