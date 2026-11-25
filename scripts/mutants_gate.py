@@ -30,7 +30,7 @@ import tomllib
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / '.cargo/mutants-gate.toml'
 WORK = ROOT / '.work/mutants-gate'
-GATE = {'Makefile', '.github/workflows/ci.yml', '.cargo/mutants.toml',
+GATE = {'Makefile', '.github/workflows/ci.yml', '.github/tools.lock.json', '.cargo/mutants.toml',
         '.cargo/mutants-gate.toml', 'scripts/mutants_gate.py', 'scripts/test_mutants_gate.py'}
 SHARDS = ('cli', 'config', 'render', 'source', 'session', 'other')
 
