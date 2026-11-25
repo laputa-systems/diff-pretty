@@ -59,9 +59,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        uses: laputa-systems/buildlib/setup@1cd9d482a684e72c68ac6fea7f4ee3a3e9c4a161 # v0.3.1
         with:
-          python-version: '3.13'
+          tools: cpython
+          lock: .github/tools.lock.json
       - name: Isolate mutation builds
         run: echo "CARGO_HOME=$RUNNER_TEMP/mutation-cargo" >> "$GITHUB_ENV"
       - name: Install cargo-mutants
