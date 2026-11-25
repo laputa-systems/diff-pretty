@@ -1,7 +1,7 @@
 budget_seconds = 1200
 timeout_seconds = 60
 build_timeout_seconds = 300
-irrelevant = ['*.md', 'docs/**', 'LICENSE']
+irrelevant = ['*.md', 'docs/**', 'LICENSE', 'Dockerfile']
 
 [[critical]]
 file = 'src/main.rs'
